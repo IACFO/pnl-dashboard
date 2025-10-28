@@ -229,10 +229,38 @@ def load_normalize(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
     return base
 
-uploaded = st.file_uploader("Carregue o arquivo **BASE_PNL.xlsx** (XLSX/CSV)", type=["xlsx","xls","csv"])
-if uploaded is None:
-    st.stop()
-base = load_normalize(uploaded.getvalue(), uploaded.name)
+# --- substitua tudo que vai desde "uploaded = st.file_uploader(...)" até o primeiro uso de 'base' ---
+
+import os
+
+# caminho padrão da base no repositório (mesma pasta do app.py)
+DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "BASE_PNL.xlsx")
+
+# opção no sidebar (se quiser permitir override por upload)
+with st.sidebar:
+    st.markdown("### Fonte de dados")
+    use_repo_file = st.checkbox("Usar BASE_PNL.xlsx do repositório", value=True)
+    uploaded = None
+    if not use_repo_file:
+        uploaded = st.file_uploader("Carregue uma base (XLSX/CSV)", type=["xlsx","xls","csv"])
+
+# leitura dos bytes + nome do arquivo
+if use_repo_file:
+    if not os.path.exists(DEFAULT_DATA_PATH):
+        st.error("Arquivo **BASE_PNL.xlsx** não encontrado no repositório. Coloque-o na mesma pasta do `app.py`.")
+        st.stop()
+    with open(DEFAULT_DATA_PATH, "rb") as f:
+        file_bytes = f.read()
+    filename = os.path.basename(DEFAULT_DATA_PATH)
+else:
+    if uploaded is None:
+        st.info("Carregue um arquivo para continuar ou marque 'Usar BASE_PNL.xlsx do repositório'.")
+        st.stop()
+    file_bytes = uploaded.getvalue()
+    filename = uploaded.name
+
+# carrega + normaliza
+base = load_normalize(file_bytes, filename)
 
 # =============== MENU LATERAL (Abas) ===============
 with st.sidebar:
