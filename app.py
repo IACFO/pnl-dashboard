@@ -13,66 +13,72 @@ import streamlit as st
 import altair as alt
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
+from datetime import datetime, timezone, timedelta
+from datetime import datetime
 
 # --- Auth simples por senha única ---
+
+AUTH_EXPIRY_DAYS = 7
+
 def require_password():
     # logout por querystring (ex.: ?logout=1)
     qs = st.query_params
     if qs.get("logout", ["0"])[0] == "1":
         st.session_state.clear()
-        if hasattr(st, "rerun"):
-            st.rerun()
+        if hasattr(st, "rerun"): st.rerun()
         else:
-            try:
-                st.experimental_rerun()
-            except Exception:
-                pass
+            try: st.experimental_rerun()
+            except Exception: pass
 
-    # força a existência da senha nos secrets
+    # senha vinda dos secrets
     secret_pwd = st.secrets.get("APP_PASSWORD", "").strip()
     if not secret_pwd:
         st.error("Senha de acesso não configurada (APP_PASSWORD).")
         st.stop()
 
-    # estado da sessão
+    # checa expiração de sessão
     authed = st.session_state.get("auth_ok", False)
+    auth_time_iso = st.session_state.get("auth_time_iso")  # ISO 8601
+    expired = True
+    if authed and auth_time_iso:
+        try:
+            t0 = datetime.fromisoformat(auth_time_iso)
+            expired = (datetime.now(timezone.utc) - t0) > timedelta(days=AUTH_EXPIRY_DAYS)
+        except Exception:
+            expired = True
 
-    if not authed:
+    if not authed or expired:
+        # limpa sessão se expirou
+        if expired:
+            st.session_state.clear()
+
         st.markdown("### 🔒 Acesso restrito")
         pwd = st.text_input("Digite a senha para acessar:", type="password", key="__pwd")
         submit = st.button("Entrar", use_container_width=True)
         if submit:
             if pwd == secret_pwd:
                 st.session_state["auth_ok"] = True
+                st.session_state["auth_time_iso"] = datetime.now(timezone.utc).isoformat()
                 st.session_state.pop("__pwd", None)
-                if hasattr(st, "rerun"):
-                    st.rerun()
+                if hasattr(st, "rerun"): st.rerun()
                 else:
-                    try:
-                        st.experimental_rerun()
-                    except Exception:
-                        pass
+                    try: st.experimental_rerun()
+                    except Exception: pass
                 return
             else:
                 st.error("Senha inválida.")
                 st.stop()
         st.stop()
 
-    # já autenticado -> mostra botão sair
+    # já autenticado e válido -> botão sair
     with st.sidebar:
         if st.button("Sair"):
             st.session_state.clear()
-            st.query_params = {"logout": "1"}  # redefine querystring
-            if hasattr(st, "rerun"):
-                st.rerun()
+            st.query_params = {"logout": "1"}
+            if hasattr(st, "rerun"): st.rerun()
             else:
-                try:
-                    st.experimental_rerun()
-                except Exception:
-                    pass
-
-# >>> CHAME LOGO APÓS OS IMPORTS:
-require_password()
+                try: st.experimental_rerun()
+                except Exception: pass
 
 # ==================== VISUAL / CSS ====================
 CB = {
@@ -316,6 +322,22 @@ def kpi_filter_options_from_base(df_src: pd.DataFrame) -> list[str]:
 def load_normalize(file_bytes: bytes, filename: str) -> pd.DataFrame:
     base = pd.read_csv(io.BytesIO(file_bytes)) if filename.lower().endswith(".csv") else pd.read_excel(io.BytesIO(file_bytes))
     base = _to_upper(base)
+
+if use_repo_file:
+    try:
+        mtime = os.path.getmtime(DEFAULT_DATA_PATH)
+        last_updated_dt = datetime.fromtimestamp(mtime)
+    except Exception:
+        last_updated_dt = datetime.now()
+else:
+    # para upload, considera o momento do upload (não há mtime persistente no Cloud)
+    last_updated_dt = datetime.now()
+
+last_updated_str = last_updated_dt.strftime("%d/%m/%Y %H:%M")
+
+# Renderiza na sidebar (logo abaixo da área de fonte de dados)
+with st.sidebar:
+    st.caption(f"📅 **Última atualização:** {last_updated_str}")
 
     if "KPI_COMPACT" not in base.columns:
         for alt in ["KPI_COMPACTO", "KPI COMPACTO", "KPI COMPACT", "KPI_COMPACTO "]:
@@ -1134,14 +1156,30 @@ with tab3:  # Gráficos
         draw_margin_block(mD, df_all_dirs, diretoria_sel_keys)
 
 with tab4:  # Roadmap
-    st.markdown("## 📌 Próximas entregas")
-    st.markdown("""
+    st.markdown("## 🗺️ Roadmap")
+
+    c1, c2 = st.columns([1, 1])
+
+    with c1:
+        st.markdown("### 📌 Próximas entregas")
+        st.markdown("""
 - **Filtro B2B**
 - **Visão canal B2C**
 - **Visão parceiro B2B**
 - **Simulador**
-- **Visão de KPIS por Analista**
-    """)
+- **Visão de KPIs por Analista**
+        """)
+
+    with c2:
+        st.markdown("### 🔧 Entregas em revisão")
+        st.markdown("""
+- **Novo cálculo para linhas de Marketing**
+- **Highlights positivos**
+- **Valores de INFO e Cauda na aba Visão Diretoria**
+- **Setores que puxam o gap em Highlights**
+        """)
+
+    st.markdown("---")
     with st.expander("🛠 Diagnóstico (para suporte)"):
         st.write("Diretorias disponíveis (KEY → count):")
         st.write(df_all_dirs["DIRETORIA_KEY"].value_counts())
