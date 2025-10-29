@@ -14,6 +14,36 @@ import altair as alt
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
+# --- Auth simples por senha única ---
+def require_password():
+    if "auth_ok" not in st.session_state:
+        st.session_state["auth_ok"] = False
+
+    if st.session_state["auth_ok"]:
+        with st.sidebar:
+            if st.button("Sair"):
+                st.session_state["auth_ok"] = False
+                st.experimental_rerun()
+        return  # já autenticado
+
+    st.markdown("### 🔒 Acesso restrito")
+    pwd = st.text_input("Digite a senha para acessar:", type="password")
+    if st.button("Entrar"):
+        valid = False
+        # busca a senha dos secrets (ou variável de ambiente como fallback)
+        secret_pwd = st.secrets.get("APP_PASSWORD", None)
+        if secret_pwd and pwd == secret_pwd:
+            valid = True
+        if valid:
+            st.session_state["auth_ok"] = True
+            st.experimental_rerun()
+        else:
+            st.error("Senha inválida.")
+
+    st.stop()  # bloqueia o resto do app enquanto não logar
+
+require_password()
+
 # ==================== VISUAL / CSS ====================
 CB = {
     "blue":  "#0033A0",
@@ -1073,8 +1103,8 @@ with tab3:  # Gráficos
     else:
         draw_margin_block(mD, df_all_dirs, diretoria_sel_keys)
 
-with tab4:  # Versionamento
-    st.markdown("## 📌 Roadmap / Próximas entregas")
+with tab4:  # Roadmap
+    st.markdown("## 📌 Próximas entregas")
     st.markdown("""
 - **Filtro B2B**
 - **Visão canal B2C**
