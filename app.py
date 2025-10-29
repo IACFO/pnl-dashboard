@@ -1,6 +1,6 @@
 # app.py
 # -----------------------------------------------------------
-# P&L – Projeção, Realizados, Comparativos e Highlights (com abas)
+# P&L – Projeção, Realizados, Comparativos e Highlights
 # -----------------------------------------------------------
 
 import io
@@ -32,7 +32,7 @@ def inject_css():
     <style>
     .block-container {{
         padding-top: 4.5rem !important;
-        padding-bottom: 2rem !important;
+        padding-bottom: 1.25rem !important;
         overflow: visible !important;
     }}
     header[data-testid="stHeader"] {{ background: {CB["bg"]}; }}
@@ -40,18 +40,21 @@ def inject_css():
     .brand-section {{
         width: 100%; display: block; box-sizing: border-box;
         background: linear-gradient(90deg, {CB["blue"]} 0%, {CB["red"]} 100%);
-        color: #fff; padding: 22px 24px; border-radius: 14px;
-        font-weight: 800; letter-spacing: .2px; margin: 8px 0 14px 0;
+        color: #fff; padding: 18px 20px; border-radius: 14px;
+        font-weight: 800; letter-spacing: .2px; margin: 8px 0 12px 0;
         text-align: center; line-height: 1.25; font-size: clamp(18px, 2.0vw, 26px);
         box-shadow: 0 2px 10px rgba(0,0,0,.06);
     }}
+
+    /* Tabelas responsivas */
     .table-wrap {{
         max-height: 70vh; overflow-y: auto; overflow-x: auto;
         border: 1px solid #e9edf4; border-radius: 10px;
-        white-space: nowrap;
+        white-space: nowrap;  /* evita quebra de linha no mobile */
     }}
     table.pnltbl {{ border-collapse: collapse; width: 100%; }}
 
+    /* Sticky headers */
     table.pnltbl thead tr:nth-child(1) th {{
         position: sticky; top: 0; z-index: 3;
         background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
@@ -59,10 +62,6 @@ def inject_css():
     }}
     table.pnltbl thead tr:nth-child(2) th {{
         position: sticky; top: 38px; z-index: 3;
-        background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
-        border-bottom: 1px solid #d0d7de;
-    }}
-    table.pnltbl th {{
         background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
         border-bottom: 1px solid #d0d7de;
     }}
@@ -79,6 +78,13 @@ def inject_css():
     }}
     .hl-sub {{ color: #5b667a; font-size: 0.96rem; }}
     .hl-bad {{ color: #E1002A; font-weight: 800; }}
+
+    /* Touch targets maiores no mobile */
+    @media (max-width: 640px) {{
+      .stMultiSelect, .stSelectbox, .stCheckbox, .stRadio, button[kind="secondary"] {{
+        font-size: 16px !important;
+      }}
+    }}
     </style>
     """, unsafe_allow_html=True)
 
@@ -90,14 +96,14 @@ def section(title: str):
 st.set_page_config(page_title="P&L – Projeção e Comparativos", layout="wide")
 section("📊 P&L – Projeção do mês e comparativos")
 
-# ==================== KPI MASTER ====================
+# ==================== KPI MASTER (completa filtros) ====================
 def remove_accents(s: str) -> str:
     return ''.join(ch for ch in unicodedata.normalize('NFKD', s) if not unicodedata.combining(ch))
-
 def _norm_key(s: str) -> str:
     return remove_accents(str(s)).strip().upper()
 
 KPI_MASTER_LIST = [
+    # (lista fornecida por você – mantida para completar filtros quando faltar algo na base)
     "GMV TOTAL","GMV RECEITA DE MERCADORIA","GMV RECEITA DE FRETE","GMV RECEITA DE SERVIÇO",
     "GMV REPASSE SERVIÇOS","GMV COMISSÃO 3P","GMV RECEITA DE CREDIÁRIO","GMV RECEITA DE CARTÕES",
     "GMV RECEITA DE MONTAGEM","GMV RECEITA DE MERCADORIA","GMV RECEITA DE ADS","GMV WRITE OFF CREDIÁRIO",
@@ -143,7 +149,7 @@ KPI_MASTER_LIST = [
     "DEMAIS DESPESAS DIRETAS ATENDIMENTO E TELEVENDAS","DEMAIS DESPESAS DIRETAS PERDAS OPERACIONAIS","DEMAIS DESPESAS DIRETAS DEPRECIAÇÃO",
     "DEMAIS DESPESAS DIRETAS OUTROS","DEMAIS DESPESAS DIRETAS EQUIVALÊNCIA","MBL","DESPESAS INDIRETAS TOTAL","LAIR TOTAL"
 ]
-KPI_MASTER_NORM_MAP = {_norm_key(k): k for k in KPI_MASTER_LIST}
+KPI_MASTER_NORM = {_norm_key(k): k for k in KPI_MASTER_LIST}
 
 # ==================== HELPERS ====================
 def _to_upper(df: pd.DataFrame) -> pd.DataFrame:
@@ -214,41 +220,38 @@ def normalize_key(x: str) -> str:
     x = re.sub(r"\s+", " ", str(x)).strip().upper()
     return remove_accents(x)
 
+# ===== Ordenação de KPI pelo campo ORDEM da base =====
 def kpi_order_map(df_src: pd.DataFrame) -> dict:
-    """mapa KPI_COMPACT -> menor ORDEM; default 9999"""
     if "KPI_COMPACT" not in df_src.columns:
         return {}
     tmp = df_src[["KPI_COMPACT","ORDEM"]].dropna(subset=["KPI_COMPACT"]).copy()
     tmp["ORDEM"] = pd.to_numeric(tmp["ORDEM"], errors="coerce")
+    # pega a menor ORDEM por KPI (como seu exemplo)
     m = tmp.groupby("KPI_COMPACT", dropna=True)["ORDEM"].min().to_dict()
     return m
 
 def kpi_filter_options_from_base(df_src: pd.DataFrame) -> list[str]:
     """
-    Retorna a lista de KPIs para os filtros respeitando a ORDEM da base:
-    - usa EXATAMENTE os nomes que estão em df_src['KPI_COMPACT']
+    Retorna a lista de KPIs para filtros respeitando a ORDEM da base:
+    - usa EXATAMENTE os nomes de df_src['KPI_COMPACT']
     - ordena por menor ORDEM por KPI (min)
-    - adiciona KPIs da lista mestre que não existem na base ao final (A–Z)
+    - adiciona KPIs da lista-mestra que não estão na base no final (A–Z)
     """
     if "KPI_COMPACT" not in df_src.columns:
         base_names = []
         ord_map = {}
     else:
-        ord_map = kpi_order_map(df_src)  # KPI_COMPACT -> menor ORDEM
+        ord_map = kpi_order_map(df_src)
+        # mantém ordem de primeira ocorrência e evita set (que desordena)
         base_names = (
             df_src["KPI_COMPACT"]
             .dropna().astype(str)
-            .pipe(lambda s: list(dict.fromkeys(s)))  # mantém 1ª ocorrência (sem set desordenado)
+            .pipe(lambda s: list(dict.fromkeys(s)))
         )
-
-    # ordena os nomes da base por ORDEM (min) e depois por nome
     base_sorted = sorted(base_names, key=lambda n: (ord_map.get(n, 9999), n))
-
-    # KPIs extras (estão na lista mestre mas não na base) -> entram no final (A-Z)
     base_norm = {_norm_key(n) for n in base_sorted}
     extras = [k for k in KPI_MASTER_LIST if _norm_key(k) not in base_norm]
     extras_sorted = sorted(extras)
-
     return base_sorted + extras_sorted
 
 # ==================== CARGA / NORMALIZAÇÃO ====================
@@ -288,29 +291,29 @@ def load_normalize(file_bytes: bytes, filename: str) -> pd.DataFrame:
     base["PRINCIPAL"] = base.get("PRINCIPAL","NAO").str.upper().replace({"NÃO":"NAO","NO":"NAO","TRUE":"SIM","FALSE":"NAO"})
     base["SINAL"] = pd.to_numeric(base.get("SINAL","1"), errors="coerce").fillna(1).astype(int)
 
-    # DIRETORIA_KEY com normalização e agrupamento
+    # DIRETORIA_KEY super permissivo (garante CAUDA/INFO)
     base["DIRETORIA_KEY"] = base["DIRETORIA"].apply(normalize_key)
-    def _norm_dirkey(x):
+    def _norm_dirkey(x: str) -> str:
         s = normalize_key(x)
-        if s in {"", "CONSOLIDADO", "TOTAL"}: return ""
+        if s in {"", "CONSOLIDADO", "TOTAL", "GERAL", "CONSOLIDADO ECOM", "ECOM CONSOLIDADO"}:
+            return ""  # Consolidado
         if "LINHA BRANCA" in s: return "LINHA BRANCA"
-        if "MOVEIS" in s: return "MOVEIS"
-        if "TELAS" in s: return "TELAS"
-        if "TELEFONIA" in s: return "TELEFONIA"
-        if "LINHA LEVE" in s or "SAZONAL" in s: return "LINHA LEVE E SAZONAL"
-        if "INFO" in s: return "INFO"
-        if "CAUDA" in s: return "CAUDA"
+        if "MOVEIS" in s or "MÓVEIS" in s: return "MOVEIS"
+        if "TELAS" in s or "TV" in s: return "TELAS"
+        if "TELEFONIA" in s or "CELULAR" in s or "MOBILE" in s: return "TELEFONIA"
+        if "LINHA LEVE" in s or "SAZONAL" in s or "SAZONAIS" in s: return "LINHA LEVE E SAZONAL"
+        if any(k in s for k in ["INFO","INFORMATI","PERIFERIC","PERIFÉRIC","INFORMÁTICA","INFORMATICA","INFO/PERIF"]):
+            return "INFO"
+        if any(k in s for k in ["CAUDA","LONG TAIL","CAUDA LONGA","LONGA"]):
+            return "CAUDA"
         return s
     base["DIRETORIA_KEY"] = base["DIRETORIA_KEY"].apply(_norm_dirkey)
 
     return base
 
-# === Fonte de dados: arquivo do repositório por padrão ===
+# === Fonte de dados: arquivo do repositório por padrão (sidebar apenas p/ fonte + versão) ===
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "BASE_PNL.xlsx")
 with st.sidebar:
-    st.markdown("## Navegação")
-    tab_choice = st.radio("Selecione a aba", ["Visão Geral", "Visão Diretoria", "Gráficos", "Versionamento"], index=0, label_visibility="collapsed")
-    st.markdown("---")
     st.markdown("### Fonte de dados")
     use_repo_file = st.checkbox("Usar BASE_PNL.xlsx do repositório", value=True)
     uploaded = None
@@ -336,13 +339,14 @@ else:
 
 base = load_normalize(file_bytes, filename)
 
-# =============== FILTROS ====================
-# Diretoria: ordenar conforme preferência
+# ==================== Abas (topo) ====================
+tab1, tab2, tab3, tab4 = st.tabs(["Visão Geral", "Visão Diretoria", "Gráficos", "Versionamento"])
+
+# ==================== Filtros (expander comum – melhor mobile) ====================
+# Diretoria: ordem fixa
 DIR_FIXED_ORDER = ["", "LINHA BRANCA", "MOVEIS", "TELAS", "TELEFONIA", "LINHA LEVE E SAZONAL", "INFO", "CAUDA"]
 def order_diretorias(opts):
-    # coloca os da ordem fixa primeiro; depois quaisquer outros por nome
-    seen = set()
-    out = []
+    seen, out = set(), []
     for k in DIR_FIXED_ORDER:
         if k in opts and k not in seen:
             out.append(k); seen.add(k)
@@ -351,52 +355,52 @@ def order_diretorias(opts):
             out.append(k); seen.add(k)
     return out
 
-c1, c2, c3, c4 = st.columns([1.3,1.2,1.3,1.0])
+# opções para filtros
+dir_keys_raw = [x for x in base["DIRETORIA_KEY"].dropna().astype(str).unique().tolist()]
+dir_keys_options = order_diretorias(dir_keys_raw)
+def _fmt_dir(k): return ("Consolidado" if k=="" else k.title())
+default_dir_key = "" if "" in dir_keys_options else (dir_keys_options[0] if dir_keys_options else "")
 
-with c1:
-    st.markdown("**Diretoria**")
-    dir_keys_raw = [x for x in base["DIRETORIA_KEY"].dropna().astype(str).unique().tolist()]
-    dir_keys_options = order_diretorias(dir_keys_raw)
-    def _fmt_dir(k): return ("Consolidado" if k=="" else k.title())
-    default_dir_key = "" if "" in dir_keys_options else (dir_keys_options[0] if dir_keys_options else "")
-    diretoria_sel_keys = st.multiselect("", dir_keys_options, default=[default_dir_key] if default_dir_key in dir_keys_options else [], format_func=_fmt_dir, label_visibility="collapsed")
+bu_vals = sorted([x for x in base["BU"].dropna().unique() if x])
+if "ORDEM SETOR" in base.columns:
+    setores = base[["CATEGORIA","ORDEM SETOR"]].drop_duplicates().sort_values("ORDEM SETOR")
+    setor_list = setores["CATEGORIA"].tolist()
+else:
+    setor_list = sorted([x for x in base["CATEGORIA"].dropna().unique() if x])
 
-with c2:
-    st.markdown("**BU**")
-    bu_vals = sorted([x for x in base["BU"].dropna().unique() if x])
-    bu_sel = st.multiselect("", bu_vals, default=[], label_visibility="collapsed")
+periods = sorted(base["PERIODO"].dropna().unique().tolist())
+p0_default_index = len(periods)-1 if periods else 0
 
-with c3:
-    st.markdown("**Setor**")
-    if "ORDEM SETOR" in base.columns:
-        setores = base[["CATEGORIA","ORDEM SETOR"]].drop_duplicates().sort_values("ORDEM SETOR")
-        setor_list = setores["CATEGORIA"].tolist()
-    else:
-        setor_list = sorted([x for x in base["CATEGORIA"].dropna().unique() if x])
-    setor_sel = st.multiselect("", setor_list, default=[], label_visibility="collapsed")
+with st.expander("🧩 Filtros", expanded=True):
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        diretoria_sel_keys = st.multiselect("Diretoria", dir_keys_options,
+                                            default=[default_dir_key] if default_dir_key in dir_keys_options else [],
+                                            format_func=_fmt_dir, key="flt_diretoria")
+    with c2:
+        bu_sel = st.multiselect("BU", bu_vals, default=[], key="flt_bu")
+    with c3:
+        setor_sel = st.multiselect("Setor", setor_list, default=[], key="flt_setor")
+    with c4:
+        p0 = st.selectbox("Mês vigente (P0)", periods, index=p0_default_index, key="flt_p0")
 
-with c4:
-    st.markdown("**Mês vigente (P0)**")
-    periods = sorted(base["PERIODO"].dropna().unique().tolist())
-    p0 = st.selectbox("", periods, index=len(periods)-1 if periods else 0, label_visibility="collapsed")
+    t1, t2, t3, t4 = st.columns(4)
+    with t1:
+        show_totais = st.checkbox("Mostrar apenas totais", value=False, key="opt_totais")
+    with t2:
+        show_money = st.checkbox("Exibir colunas $", value=True, key="opt_money")
+    with t3:
+        show_percent = st.checkbox("Exibir colunas %RL", value=False, key="opt_pct")  # default desmarcado
+    with t4:
+        show_principais = st.checkbox("Exibir apenas KPIs principais", value=False, key="opt_main")
 
-st.write("")
-t1, t2, t3, t4 = st.columns(4)
-with t1:
-    show_totais = st.checkbox("Mostrar apenas totais", value=False)
-with t2:
-    show_money = st.checkbox("Exibir colunas $", value=True)
-with t3:
-    # default agora DESMARCADO
-    show_percent = st.checkbox("Exibir colunas %RL", value=False)
-with t4:
-    show_principais = st.checkbox("Exibir apenas KPIs principais", value=False)
-
-only_margins = st.checkbox("Exibir apenas linhas de Margem (MC#1 a MC#4)", value=False)
+    only_margins = st.checkbox("Exibir apenas linhas de Margem (MC#1 a MC#4)", value=False, key="opt_margins")
 
 # --- aplica filtros base comuns ---
 def apply_common_filters(df0: pd.DataFrame):
     d = df0.copy()
+    if diretoria_sel_keys:
+        d = d[d["DIRETORIA_KEY"].isin(diretoria_sel_keys)]
     if bu_sel:
         d = d[d["BU"].isin(bu_sel)]
     if setor_sel:
@@ -407,13 +411,9 @@ def apply_common_filters(df0: pd.DataFrame):
         d = d[d["AGREG"].str.lower()=="pai"]
     return d
 
-# 1) DF principal (respeita diretoria selecionada)
 df = apply_common_filters(base)
-if diretoria_sel_keys:
-    df = df[df["DIRETORIA_KEY"].isin(diretoria_sel_keys)]
-
-# 2) DF para visão diretoria/gráficos (todas diretorias)
-df_all_dirs = apply_common_filters(base)
+df_all_dirs = base.copy()
+df_all_dirs = apply_common_filters(df_all_dirs.assign(DIRETORIA_KEY=base["DIRETORIA_KEY"]))  # aplica BU/Setor/etc., mas mantém todas diretorias caso precise
 
 if df.empty:
     st.info("Sem dados para os filtros selecionados."); st.stop()
@@ -436,13 +436,8 @@ st.markdown(f"**Períodos:** P0=`{p0}` | M-1=`{p_m1}` | M-2=`{p_m2}` | M-3=`{p_m
 @st.cache_data(show_spinner=False)
 def pivotize(df_in: pd.DataFrame, p0, p_m1, p_m2, p_m3, p_m12):
     index_cols = ["AGREG","KPI_COMPACT","KPI","SINAL","FAMILIA","ORDEM","CATEGORIA","TIPO","DIRETORIA","DIRETORIA_KEY"]
-
     df_key_sorted = df_in.sort_values(["AGREG","KPI_COMPACT","KPI","PERIODO","METRICA"])
-    df_dedup = df_key_sorted.drop_duplicates(
-        subset=index_cols + ["PERIODO","METRICA"],
-        keep="first"
-    )
-
+    df_dedup = df_key_sorted.drop_duplicates(subset=index_cols + ["PERIODO","METRICA"], keep="first")
     pv_money = pd.pivot_table(df_dedup, index=index_cols, columns=["PERIODO","METRICA"], values="$",  aggfunc="first")
     pv_pct   = pd.pivot_table(df_dedup, index=index_cols, columns=["PERIODO","METRICA"], values="PCT", aggfunc="first")
 
@@ -465,13 +460,13 @@ def pivotize(df_in: pd.DataFrame, p0, p_m1, p_m2, p_m3, p_m12):
         p_fcst  = col_get(pv_pct,   p0,   "forecast"),
     ).reset_index()
 
+    # deltas (somente calculadas aqui)
     m["d_m1"]   = m["proj"] - m["real_m1"]
     m["d_m12"]  = m["proj"] - m["real_m12"]
     m["d_fc"]   = m["proj"] - m["fcst"]
     m["pd_m1"]  = m["p_proj"] - m["p_m1v"]
     m["pd_m12"] = m["p_proj"] - m["p_m12v"]
     m["pd_fc"]  = m["p_proj"] - m["p_fcst"]
-
     return m
 
 m  = pivotize(df,          p0, p_m1, p_m2, p_m3, p_m12)
@@ -484,16 +479,6 @@ def dedup_kpi(df_in: pd.DataFrame) -> pd.DataFrame:
     filhos = filhos.drop_duplicates(subset=["KPI"], keep="first")
     out = pd.concat([pais, filhos], ignore_index=True).sort_values("ORDEM")
     return out
-
-if only_margins:
-    margin_names = [
-        "Margem Contribuição #1 (CashMerc + Bonif. + Demais Rec)",
-        "Margem Contribuição #2",
-        "Margem Contribuição #3",
-        "Margem Contribuição #4",
-    ]
-    m  = m[m["KPI_COMPACT"].isin(margin_names)]
-    mD = mD[mD["KPI_COMPACT"].isin(margin_names)]
 
 # ======= Fallback PP (M-1) quando p_m1v não veio do pivô =======
 def _fallback_pct_real_m1(df_raw: pd.DataFrame, r_agreg, r_kpi_compact, r_kpi, p_m1):
@@ -512,42 +497,67 @@ def _fallback_pct_real_m1(df_raw: pd.DataFrame, r_agreg, r_kpi_compact, r_kpi, p
             return v/100.0 if abs(v)>1 else v
     return np.nan
 
-# ==================== CONTRIBUIÇÃO POR SETOR (ROBUSTO) ====================
+# ==================== CONTRIBUIÇÃO POR SETOR (robusto) ====================
 def sector_contribution_delta_m1(df_raw: pd.DataFrame, kpi_compact: str, p0: str, p_m1: str) -> pd.Series:
+    """
+    Retorna contribuição por CATEGORIA do gap (Projeção - Real M-1) do KPI pai.
+    Estratégia:
+      1) Consolidado (DIR in {"", CONSOLIDADO, TOTAL}) + filhos
+      2) Consolidado + pais
+      3) Todas diretorias + filhos; se vazio, todas diretorias + pais
+    """
     if df_raw.empty:
         return pd.Series(dtype=float)
-    d0 = df_raw.copy()
-    d0["DIR_KEY_N"] = d0["DIRETORIA_KEY"].astype(str).str.strip().str.upper().fillna("")
-    d0["AGREG_N"]   = d0["AGREG"].astype(str).str.strip().str.lower()
-    d0["CAT_N"]     = d0["CATEGORIA"].astype(str).str.strip()
-    d0["CAT_UP"]    = d0["CAT_N"].str.upper()
-    cons_keys = {"", "CONSOLIDADO", "TOTAL"}
-    have_cons = d0["DIR_KEY_N"].isin(cons_keys).any()
-    d = d0[d0["DIR_KEY_N"].isin(cons_keys)] if have_cons else d0
-    d = d[d["KPI_COMPACT"] == kpi_compact]
-    if d.empty: return pd.Series(dtype=float)
+
+    def _cleanup(d):
+        d = d.copy()
+        d["DIR_KEY_N"] = d["DIRETORIA_KEY"].astype(str).str.strip().str.upper().fillna("")
+        d["AGREG_N"]   = d["AGREG"].astype(str).str.strip().str.lower()
+        d["CAT_UP"]    = d["CATEGORIA"].astype(str).str.strip().str.upper()
+        return d
 
     def _sum_rs(g):
-        vals = pd.to_numeric(g["$"], errors="coerce").fillna(0)
-        sinal = pd.to_numeric(g["SINAL"], errors="coerce").fillna(1)
+        vals  = pd.to_numeric(g["$"], errors="coerce").fillna(0.0)
+        sinal = pd.to_numeric(g["SINAL"], errors="coerce").fillna(1.0)
         return (vals * sinal).sum(min_count=1)
 
     def _make_series(dsub: pd.DataFrame) -> pd.Series:
-        proj = dsub[(dsub["PERIODO"] == p0) & (dsub["METRICA"] == "projecao")].groupby("CAT_UP").apply(_sum_rs)
-        m1   = dsub[(dsub["PERIODO"] == p_m1) & (dsub["METRICA"] == "realizado")].groupby("CAT_UP").apply(_sum_rs)
-        s = (proj - m1).dropna()
-        s = s[~s.index.isin(["", "TOTAL"])]
-        s = s[abs(s) > 0]
+        proj = dsub[(dsub["PERIODO"]==p0)  & (dsub["METRICA"]=="projecao")].groupby("CAT_UP").apply(_sum_rs)
+        m1   = dsub[(dsub["PERIODO"]==p_m1) & (dsub["METRICA"]=="realizado")].groupby("CAT_UP").apply(_sum_rs)
+        s = (proj - m1)
+        if s is None or s.empty:
+            return pd.Series(dtype=float)
+        s = s.dropna()
+        s = s[~s.index.isin(["", "TOTAL", "CONSOLIDADO"])]
+        s = s[s != 0]
         return s
 
-    s = _make_series(d[d["AGREG_N"] == "filho"])
-    if s.empty: s = _make_series(d[d["AGREG_N"] == "pai"])
-    if s.empty: s = _make_series(d)
-    if s.empty: return s
+    d0 = _cleanup(df_raw)
+    d0 = d0[d0["KPI_COMPACT"]==kpi_compact]
 
-    if (s < 0).any():
-        return s.sort_values(ascending=True)
-    return s.reindex(s.abs().sort_values(ascending=False).index)
+    cons_keys = {"", "CONSOLIDADO", "TOTAL"}
+    have_cons = d0["DIR_KEY_N"].isin(cons_keys).any()
+
+    # 1) consolidado + filhos
+    if have_cons:
+        s = _make_series(d0[d0["DIR_KEY_N"].isin(cons_keys) & (d0["AGREG_N"]=="filho")])
+        if not s.empty:
+            return s.sort_values(ascending=True) if (s<0).any() else s.reindex(s.abs().sort_values(ascending=False).index)
+
+    # 2) consolidado + pais
+    if have_cons:
+        s = _make_series(d0[d0["DIR_KEY_N"].isin(cons_keys) & (d0["AGREG_N"]=="pai")])
+        if not s.empty:
+            return s.sort_values(ascending=True) if (s<0).any() else s.reindex(s.abs().sort_values(ascending=False).index)
+
+    # 3) todas diretorias + filhos (ou pais)
+    s = _make_series(d0[d0["AGREG_N"]=="filho"])
+    if s.empty:
+        s = _make_series(d0[d0["AGREG_N"]=="pai"])
+    if not s.empty:
+        return s.sort_values(ascending=True) if (s<0).any() else s.reindex(s.abs().sort_values(ascending=False).index)
+
+    return pd.Series(dtype=float)
 
 # ==================== RENDERIZAÇÃO TABELAS ====================
 def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnltbl_general") -> str:
@@ -636,7 +646,17 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnl
 
 def render_table_diretoria(m_df: pd.DataFrame, table_id="pnltbl_dir") -> str:
     all_keys = [x for x in m_df["DIRETORIA_KEY"].fillna("").astype(str).unique().tolist()]
-    dir_order = order_diretorias(all_keys)
+    # ordem fixa
+    def order_diretorias_local(opts):
+        seen, out = set(), []
+        for k in DIR_FIXED_ORDER:
+            if k in opts and k not in seen:
+                out.append(k); seen.add(k)
+        for k in sorted(opts):
+            if k not in seen:
+                out.append(k); seen.add(k)
+        return out
+    dir_order = order_diretorias_local(all_keys)
 
     key_to_label = (
         m_df[["DIRETORIA_KEY","DIRETORIA"]]
@@ -693,7 +713,7 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id="pnltbl_dir") -> str:
 # ==================== GRÁFICOS ====================
 def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_name: str, diretoria_sel_keys: list[str]):
     desired_order = ["M-12","M-3","M-2","M-1","Projeção"]
-
+    # diretorias a exibir
     keys_want = list(diretoria_sel_keys or [])
     if not keys_want:
         for k in DIR_FIXED_ORDER:
@@ -787,7 +807,7 @@ def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretori
                     y = float(val)*100.0
                     rows.append({"Diretoria": ("Consolidado" if k=="" else k.title()), "Período": lab,
                                  "Valor": y, "YLabel": "% da Receita Líquida", "Label": f"{y:.1f}%"})
-        if not rows: 
+        if not rows:
             continue
         chart_df = pd.DataFrame(rows)
         chart_df["Período"] = pd.Categorical(chart_df["Período"], categories=desired_order, ordered=True)
@@ -806,20 +826,18 @@ def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretori
         st.markdown(f"**{name} – %RL**")
         st.altair_chart(base + labels, use_container_width=True)
 
-# ==================== TELA (ABAS) ====================
-if tab_choice == "Visão Geral":
-    # Opções de KPI = união (base + master), ordenadas por ORDEM
-    kpis_base = [str(x) for x in df_all_dirs.get("KPI_COMPACT", pd.Series(dtype=str)).dropna().tolist()]
-    kpi_union_norm = { _norm_key(x): x for x in kpis_base }
-    kpi_union_norm.update(KPI_MASTER_NORM_MAP)
-    kpi_union_raw = [kpi_union_norm[n] for n in kpi_union_norm.keys()]
+# ==================== Telas ====================
+with tab1:  # Visão Geral
+    # Filtro de KPI respeitando ORDEM da base
     kpi_opts_all = kpi_filter_options_from_base(df_all_dirs)
     kpi_opts = ["(todos)"] + kpi_opts_all
-    kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0)
+    kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0, key="kpi_vg")
 
+    # aplica filtro (somente linha específica) se selecionado
     if kpi_filter != "(todos)":
         m_show = m[(m["KPI_COMPACT"]==kpi_filter) | (m["KPI"]==kpi_filter)].copy()
-        if m_show.empty: st.info("KPI sem dados para os filtros."); st.stop()
+        if m_show.empty:
+            st.info("KPI sem dados para os filtros."); st.stop()
     else:
         m_show = m
 
@@ -849,8 +867,7 @@ if tab_choice == "Visão Geral":
     else:
         st.markdown("**Comparativo vs M-1 – Maiores quedas (gap ≥ R$ 100 mil)**")
         for _, r in work.sort_values("gap_m1").iterrows():
-            kpi_name = r["KPI_COMPACT"]
-            delta_rs = abs(float(r["gap_m1"]))
+            kpi_name = r["KPI_COMPACT"]; delta_rs = abs(float(r["gap_m1"]))
             setores_txt = ""
             if _show_sector_breakdown:
                 contr = sector_contribution_delta_m1(df_all_dirs, kpi_name, p0, p_m1)
@@ -871,34 +888,24 @@ if tab_choice == "Visão Geral":
                 f"</div></div>", unsafe_allow_html=True
             )
 
-elif tab_choice == "Visão Diretoria":
-    # Opções de KPI ordenadas por ORDEM
-    kpis_base = [str(x) for x in df_all_dirs.get("KPI_COMPACT", pd.Series(dtype=str)).dropna().tolist()]
-    kpi_union_norm = { _norm_key(x): x for x in kpis_base }
-    kpi_union_norm.update(KPI_MASTER_NORM_MAP)
-    kpi_union_raw = [kpi_union_norm[n] for n in kpi_union_norm.keys()]
+with tab2:  # Visão Diretoria
     kpi_opts_all = kpi_filter_options_from_base(df_all_dirs)
     kpi_opts = ["(todos)"] + kpi_opts_all
-    kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0)
+    kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0, key="kpi_vd")
 
     if kpi_filter != "(todos)":
         mD_show = mD[(mD["KPI_COMPACT"]==kpi_filter) | (mD["KPI"]==kpi_filter)].copy()
-        if mD_show.empty: st.info("KPI sem dados para os filtros."); st.stop()
+        if mD_show.empty:
+            st.info("KPI sem dados para os filtros."); st.stop()
     else:
         mD_show = mD
 
     html_dir = render_table_diretoria(mD_show, table_id="pnltbl_dir")
     st.markdown(html_dir, unsafe_allow_html=True)
 
-elif tab_choice == "Gráficos":
-    # Multiselect de KPI ordenado por ORDEM
-    kpis_base = [str(x) for x in df_all_dirs.get("KPI_COMPACT", pd.Series(dtype=str)).dropna().tolist()]
-    kpi_union_norm = { _norm_key(x): x for x in kpis_base }
-    kpi_union_norm.update(KPI_MASTER_NORM_MAP)
-    kpi_union_raw = [kpi_union_norm[n] for n in kpi_union_norm.keys()]
+with tab3:  # Gráficos
     kpi_options_ordered = kpi_filter_options_from_base(df_all_dirs)
-
-    kpi_sel = st.multiselect("KPI(s) (opcional):", options=kpi_options_ordered, default=[])
+    kpi_sel = st.multiselect("KPI(s) (opcional):", options=kpi_options_ordered, default=[], key="kpi_gfx")
 
     if kpi_sel:
         for kpi_name in kpi_sel:
@@ -906,12 +913,13 @@ elif tab_choice == "Gráficos":
     else:
         draw_margin_block(mD, df_all_dirs, diretoria_sel_keys)
 
-else:  # Versionamento
+with tab4:  # Versionamento
     st.markdown("## 📌 Roadmap / Próximas entregas")
     st.markdown("""
 - **Filtro B2B**
 - **Visão canal B2C**
 - **Visão parceiro B2B**
+- **Simulador**
     """)
     with st.expander("🛠 Diagnóstico (para suporte)"):
         st.write("Diretorias disponíveis (KEY → count):")
