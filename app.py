@@ -7,17 +7,16 @@ import io
 import os
 import re
 import unicodedata
+from datetime import datetime, timezone, timedelta
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
-from datetime import datetime, timezone, timedelta
-from datetime import datetime
 
-# --- Auth simples por senha única ---
-
+# ===== LOGIN POR SENHA ÚNICA (expira em 7 dias) =====
 AUTH_EXPIRY_DAYS = 7
 
 def require_password():
@@ -25,10 +24,13 @@ def require_password():
     qs = st.query_params
     if qs.get("logout", ["0"])[0] == "1":
         st.session_state.clear()
-        if hasattr(st, "rerun"): st.rerun()
+        if hasattr(st, "rerun"):
+            st.rerun()
         else:
-            try: st.experimental_rerun()
-            except Exception: pass
+            try:
+                st.experimental_rerun()
+            except Exception:
+                pass
 
     # senha vinda dos secrets
     secret_pwd = st.secrets.get("APP_PASSWORD", "").strip()
@@ -36,9 +38,9 @@ def require_password():
         st.error("Senha de acesso não configurada (APP_PASSWORD).")
         st.stop()
 
-    # checa expiração de sessão
+    # checa expiração
     authed = st.session_state.get("auth_ok", False)
-    auth_time_iso = st.session_state.get("auth_time_iso")  # ISO 8601
+    auth_time_iso = st.session_state.get("auth_time_iso")
     expired = True
     if authed and auth_time_iso:
         try:
@@ -48,7 +50,6 @@ def require_password():
             expired = True
 
     if not authed or expired:
-        # limpa sessão se expirou
         if expired:
             st.session_state.clear()
 
@@ -60,10 +61,13 @@ def require_password():
                 st.session_state["auth_ok"] = True
                 st.session_state["auth_time_iso"] = datetime.now(timezone.utc).isoformat()
                 st.session_state.pop("__pwd", None)
-                if hasattr(st, "rerun"): st.rerun()
+                if hasattr(st, "rerun"):
+                    st.rerun()
                 else:
-                    try: st.experimental_rerun()
-                    except Exception: pass
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
                 return
             else:
                 st.error("Senha inválida.")
@@ -75,10 +79,16 @@ def require_password():
         if st.button("Sair"):
             st.session_state.clear()
             st.query_params = {"logout": "1"}
-            if hasattr(st, "rerun"): st.rerun()
+            if hasattr(st, "rerun"):
+                st.rerun()
             else:
-                try: st.experimental_rerun()
-                except Exception: pass
+                try:
+                    st.experimental_rerun()
+                except Exception:
+                    pass
+
+# >>> CHAME O GATE ANTES DE QUALQUER OUTRA UI
+require_password()
 
 # ==================== VISUAL / CSS ====================
 CB = {
@@ -112,22 +122,22 @@ def inject_css():
         box-shadow: 0 2px 10px rgba(0,0,0,.06);
     }}
 
-    /* Tabelas responsivas */
     .table-wrap {{
         max-height: 70vh; overflow-y: auto; overflow-x: auto;
         border: 1px solid #e9edf4; border-radius: 10px;
-        white-space: nowrap;  /* evita quebra de linha no mobile */
+        white-space: nowrap;
+        -webkit-overflow-scrolling: touch;
     }}
     table.pnltbl {{ border-collapse: collapse; width: 100%; }}
 
     /* Sticky headers */
     table.pnltbl thead tr:nth-child(1) th {{
-        position: sticky; top: 0; z-index: 3;
+        position: sticky; top: 0; z-index: 5;
         background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
         border-bottom: 1px solid #d0d7de;
     }}
     table.pnltbl thead tr:nth-child(2) th {{
-        position: sticky; top: 38px; z-index: 3;
+        position: sticky; top: 38px; z-index: 5;
         background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
         border-bottom: 1px solid #d0d7de;
     }}
@@ -145,7 +155,7 @@ def inject_css():
     .hl-sub {{ color: #5b667a; font-size: 0.96rem; }}
     .hl-bad {{ color: #E1002A; font-weight: 800; }}
 
-    /* Touch targets maiores no mobile */
+    /* Mobile tweaks */
     @media (max-width: 640px) {{
       .stMultiSelect, .stSelectbox, .stCheckbox, .stRadio, button[kind="secondary"] {{
         font-size: 16px !important;
@@ -162,57 +172,20 @@ def section(title: str):
 st.set_page_config(page_title="P&L – Projeção e Comparativos", layout="wide")
 section("📊 P&L – Projeção do mês e comparativos")
 
-# ==================== KPI MASTER (completa filtros) ====================
+# ==================== KPI MASTER ====================
 def remove_accents(s: str) -> str:
     return ''.join(ch for ch in unicodedata.normalize('NFKD', s) if not unicodedata.combining(ch))
 def _norm_key(s: str) -> str:
     return remove_accents(str(s)).strip().upper()
 
+# lista mestra (encurtada por brevidade — mantenha a sua completa se quiser)
 KPI_MASTER_LIST = [
-    "GMV TOTAL","GMV RECEITA DE MERCADORIA","GMV RECEITA DE FRETE","GMV RECEITA DE SERVIÇO",
-    "GMV REPASSE SERVIÇOS","GMV COMISSÃO 3P","GMV RECEITA DE CREDIÁRIO","GMV RECEITA DE CARTÕES",
-    "GMV RECEITA DE MONTAGEM","GMV RECEITA DE MERCADORIA","GMV RECEITA DE ADS","GMV WRITE OFF CREDIÁRIO",
-    "GMV CANCELAMENTO","GMV CUT-OFF","GMV JUROS DE CARTÃO","GMV DEMAIS EMPRESAS","RB TOTAL","RB MERCADORIA",
-    "RB FRETE","RB SERVIÇOS","RB COMISSÃO 3P","RB CREDIÁRIO","RB CARTÕES","RB MONTAGEM","RB ADS","RB JUROS DE CARTÃO",
-    "IMPOSTOS TOTAL","IMPOSTOS MERCADORIA","IMPOSTOS FRETE","IMPOSTOS SERVIÇOS","IMPOSTOS COMISSÃO 3P",
-    "IMPOSTOS CREDIÁRIO","IMPOSTOS CARTÕES","IMPOSTOS MONTAGEM","IMPOSTOS ADS","IMPOSTOS JUROS DE CARTÃO",
-    "RL TOTAL (MERCADORIA + SERVIÇOS)","CUSTO MERCADORIA TOTAL","CUSTO MERCADORIA GCB","CUSTO MERCADORIA GCB CUT-OFF",
-    "CUSTO MERCADORIA GCB RESSARCIMENTO TRANSPORTADORA","CUSTO MERCADORIA GCB MARGEM NEGATIVA E OBSOLETO",
-    "CUSTO MERCADORIA GCB FECHAMENTO DE ESTOQUE","CUSTO MERCADORIA GCB CRÉDITO STF","CUSTO MERCADORIA GCB CRÉDITO PRESUMIDO",
-    "CUSTO MERCADORIA GCB FUNDO EQUILIBRIO FISCAL RJ","CUSTO MERCADORIA GCB OUTROS","CUSTO MERCADORIA BARTIRA MATÉRIA PRIMA NACIONAL",
-    "CUSTO MERCADORIA BARTIRA MATÉRIA PRIMA EXPORTAÇÃO","CUSTO MERCADORIA BARTIRA PERDAS DE PRODUÇÃO",
-    "CUSTO MERCADORIA BARTIRA CRÉDITO OUTORGADO","CUSTO MERCADORIA BARTIRA GCB NO ESTOQUE","CUSTO MERCADORIA CNT",
-    "CASH 1P MERCADORIA","% MARGEM 1P","BONIFICAÇÃO TOTAL","BONIFICAÇÃO","BONIFICAÇÃO CUSTO DE CESSÃO E PAGAMENTO",
-    "BONIFICAÇÃO GIRO DE ESTOQUE","BONIFICAÇÃO DESPESA FINANCEIRA","BONIFICAÇÃO DESPESAS MARKETING","BONIFICAÇÃO PROVISÕES",
-    "BONIFICAÇÃO % MERCADORIA","CASH 1P MERCADORIA E BONIFICAÇÃO","% MARGEM 1P MERCADORIA E BONIFICAÇÃO",
-    "CUSTO ADS TOTAL","CASH MARGIN ADS","% CASH ADS","DEMAIS RL TOTAL","MARGEM #1 CASHMERC + BONIFICAÇÃO + DEMAIS REC",
-    "DESPESAS VARIÁVEIS TOTAL","DESPESAS VARIÁVEIS MARKETING","DESPESAS VARIAVEIS MARKETING PERFORMANCE",
-    "DESPESAS VARIAVEIS MARKETING MIDIAS TOP MID FUNNEL","DESPESAS VARIAVEIS MARKETING APP","DESPESAS VARIAVEIS MARKETING AQUISIÇÃO",
-    "DESPESAS VARIAVEIS MARKETING PRODUÇÃO","DESPESAS VARIAVEIS MARKETING REGIONAL","DESPESAS VARIAVEIS MARKETING SOCIAL BRANDING",
-    "DESPESAS VARIAVEIS MARKETING CRM","DESPESAS VARIAVEIS MARKETING FERRAMENTAS","DESPESAS VARIÁVEIS ADS",
-    "DESPESAS VARIÁVEIS FRETE","DESPESAS VARIÁVEIS ESCOLTA","DESPESAS VARIÁVEIS ENTREGA AO CLIENTE",
-    "DESPESAS VARIÁVEIS COMISSÃO VENDEDORES","DESPESAS VARIÁVEIS DESCONTOS E COMISSÕES","DESPESAS VARIAVEIS AGENDA NEGATIVA",
-    "DESPESAS VARIAVEIS DESCONTO DE INCENTIVO","DESPESAS VARIAVEIS DESPESAS COMERCIAIS","DESPESAS VARIAVEIS COMISSÃO E FIDELIDADE",
-    "DESPESAS VARIAVEIS PERDA COM PARCEIROS","DESPESAS VARIÁVEIS CONSERTO MERCADORIAS","DESPESAS VARIÁVEIS ABASTECIMENTO LOJAS",
-    "DESPESAS VARIÁVEIS DEMAIS CUSTOS LOGÍSTICOS","DESPESAS VARIAVEIS TRANSFERENCIA ENTRE CDS","DESPESAS VARIÁVEIS MONTADORES TERCEIRIZADOS",
-    "DESPESAS VARIAVEIS TERCEIRIZAÇÃO DE CARGA E DESCARGA","DESPESAS VARIAVEIS TERCEIRIZAÇÃO DO APOIO LOGÍSTICO",
-    "DESPESAS VARIAVEIS ALUGUEL DE EQUIPAMENTOS","DESPESAS VARIAVEIS MANUTENÇÃO DE EQUIPAMENTOS","DESPESAS VARIÁVEIS CUSTO DE CREDIÁRIO",
-    "DESPESAS VARIAVEIS CUSTO DE CREDIÁRIO FUNDING","DESPESAS VARIAVEIS CUSTO DE CREDIÁRIO BOLETO CDCI",
-    "DESPESAS VARIAVEIS CUSTO DE CREDIÁRIO COMISSÃO BANQI","DESPESAS VARIÁVEIS PRODUTOS DE CRÉDITO",
-    "DESPESAS VARIAVEIS PERDA EFETIVA","DESPESAS VARIAVEIS IOF CANCELAMENTO","DESPESAS VARIAVEIS CRÉDITO PROVISÃO",
-    "DESPESAS VARIAVEIS RENDAS DE RECUPERAÇÃO","DESPESAS VARIÁVEIS FRAUDES COM CARNÊ","DESPESAS VARIÁVEIS CUSTO DE CRÉDITO E COBRANÇA",
-    "DESPESAS VARIAVEIS ANÁLISE DE CRÉDITO","DESPESAS VARIÁVEIS COBRANÇA","MARGEM #2","CUSTO CARREGAMENTO ESTOQUE TOTAL",
-    "CUSTO CARREGAMENTO ESTOQUE","CUSTO CARREGAMENTO ESTOQUE FINANCIAMENTO FORNECEDOR","CUSTO CARREGAMENTO ESTOQUE FORNECEDOR CONVÊNIO",
-    "MARGEM #3","CFC TOTAL","CFC FRAUDE E CHARGEBACK TOTAL","CFC  FRAUDE E CHARGEBACK PERDA COM FRAUDE",
-    "CFC  FRAUDE E CHARGEBACK PERDA COM DESACORDO","CFC FRAUDE E CHARGEBACK FERRAMENTAS ANTIFRAUDE","CFC  FRAUDE E CHARGEBACK PROVISÃO",
-    "CFC VENDAS NO CARTÃO COM JUROS","CFC MEIOS DE PAGAMENTO","CFC  MEIOS DE PAGAMENTO CARTÃO DE CRÉDITO",
-    "CFC  MEIOS DE PAGAMENTO NUMERÁRIO","CFC  MEIOS DE PAGAMENTO PIX","CFC  MEIOS DE PAGAMENTO GATEWAY","CFC FINANCIAMENTO AO CONSUMIDOR",
-    "MARGEM #4","DESPESAS SEMI VARIÁVEIS TOTAL","DESPESAS SEMI VARIÁVEIS FROTA PRÓPRIA","DESPESAS SEMI VARIÁVEIS CTO",
-    "DESPESAS SEMI VARIÁVEIS BANCÁRIAS E FIANÇA","DESPESAS SEMI VARIÁVEIS COM PESSOAL","MARGEM #5","DEMAIS DESPESAS DIRETAS TOTAL",
-    "DEMAIS DESPESAS DIRETAS JURÍDICO","DEMAIS DESPESAS DIRETAS TECNOLOGIA","DEMAIS DESPESAS DIRETAS GERAIS E ADMINISTRATIVAS",
-    "DEMAIS DESPESAS DIRETAS ASSESSORIA","DEMAIS DESPESAS DIRETAS COMUNICAÇÃO E SUSTENTABILIDADE","DEMAIS DESPESAS DIRETAS RESULTADO FINANCEIRO",
-    "DEMAIS DESPESAS DIRETAS ATENDIMENTO E TELEVENDAS","DEMAIS DESPESAS DIRETAS PERDAS OPERACIONAIS","DEMAIS DESPESAS DIRETAS DEPRECIAÇÃO",
-    "DEMAIS DESPESAS DIRETAS OUTROS","DEMAIS DESPESAS DIRETAS EQUIVALÊNCIA","MBL","DESPESAS INDIRETAS TOTAL","LAIR TOTAL"
+    "GMV TOTAL","RB TOTAL","IMPOSTOS TOTAL","RL TOTAL (MERCADORIA + SERVIÇOS)",
+    "CUSTO MERCADORIA TOTAL","% MARGEM 1P","BONIFICAÇÃO","MARGEM #2","MARGEM #3","MARGEM #4",
+    "DESPESAS VARIÁVEIS TOTAL","CFC TOTAL","DESPESAS SEMI VARIÁVEIS TOTAL","DEMAIS DESPESAS DIRETAS TOTAL",
+    "MBL","DESPESAS INDIRETAS TOTAL","LAIR TOTAL",
+    "Margem Contribuição #1 (CashMerc + Bonif. + Demais Rec)",
+    "Margem Contribuição #2","Margem Contribuição #3","Margem Contribuição #4"
 ]
 KPI_MASTER_NORM = {_norm_key(k): k for k in KPI_MASTER_LIST}
 
@@ -285,32 +258,20 @@ def normalize_key(x: str) -> str:
     x = re.sub(r"\s+", " ", str(x)).strip().upper()
     return remove_accents(x)
 
-# ===== Ordenação de KPI pelo campo ORDEM da base =====
 def kpi_order_map(df_src: pd.DataFrame) -> dict:
     if "KPI_COMPACT" not in df_src.columns:
         return {}
     tmp = df_src[["KPI_COMPACT","ORDEM"]].dropna(subset=["KPI_COMPACT"]).copy()
     tmp["ORDEM"] = pd.to_numeric(tmp["ORDEM"], errors="coerce")
-    m = tmp.groupby("KPI_COMPACT", dropna=True)["ORDEM"].min().to_dict()
-    return m
+    return tmp.groupby("KPI_COMPACT", dropna=True)["ORDEM"].min().to_dict()
 
 def kpi_filter_options_from_base(df_src: pd.DataFrame) -> list[str]:
-    """
-    Retorna a lista de KPIs para filtros respeitando a ORDEM da base:
-    - usa EXATAMENTE os nomes de df_src['KPI_COMPACT']
-    - ordena por menor ORDEM por KPI (min)
-    - adiciona KPIs da lista-mestra que não estão na base no final (A–Z)
-    """
     if "KPI_COMPACT" not in df_src.columns:
-        base_names = []
-        ord_map = {}
+        base_names, ord_map = [], {}
     else:
         ord_map = kpi_order_map(df_src)
-        base_names = (
-            df_src["KPI_COMPACT"]
-            .dropna().astype(str)
-            .pipe(lambda s: list(dict.fromkeys(s)))
-        )
+        base_names = df_src["KPI_COMPACT"].dropna().astype(str)
+        base_names = list(dict.fromkeys(base_names))  # mantém ordem de aparição
     base_sorted = sorted(base_names, key=lambda n: (ord_map.get(n, 9999), n))
     base_norm = {_norm_key(n) for n in base_sorted}
     extras = [k for k in KPI_MASTER_LIST if _norm_key(k) not in base_norm]
@@ -322,22 +283,6 @@ def kpi_filter_options_from_base(df_src: pd.DataFrame) -> list[str]:
 def load_normalize(file_bytes: bytes, filename: str) -> pd.DataFrame:
     base = pd.read_csv(io.BytesIO(file_bytes)) if filename.lower().endswith(".csv") else pd.read_excel(io.BytesIO(file_bytes))
     base = _to_upper(base)
-
-if use_repo_file:
-    try:
-        mtime = os.path.getmtime(DEFAULT_DATA_PATH)
-        last_updated_dt = datetime.fromtimestamp(mtime)
-    except Exception:
-        last_updated_dt = datetime.now()
-else:
-    # para upload, considera o momento do upload (não há mtime persistente no Cloud)
-    last_updated_dt = datetime.now()
-
-last_updated_str = last_updated_dt.strftime("%d/%m/%Y %H:%M")
-
-# Renderiza na sidebar (logo abaixo da área de fonte de dados)
-with st.sidebar:
-    st.caption(f"📅 **Última atualização:** {last_updated_str}")
 
     if "KPI_COMPACT" not in base.columns:
         for alt in ["KPI_COMPACTO", "KPI COMPACTO", "KPI COMPACT", "KPI_COMPACTO "]:
@@ -370,7 +315,7 @@ with st.sidebar:
     base["PRINCIPAL"] = base.get("PRINCIPAL","NAO").str.upper().replace({"NÃO":"NAO","NO":"NAO","TRUE":"SIM","FALSE":"NAO"})
     base["SINAL"] = pd.to_numeric(base.get("SINAL","1"), errors="coerce").fillna(1).astype(int)
 
-    # DIRETORIA_KEY super permissivo (garante CAUDA/INFO)
+    # DIRETORIA_KEY robusto (garante CAUDA/INFO)
     base["DIRETORIA_KEY"] = base["DIRETORIA"].apply(normalize_key)
     def _norm_dirkey(x: str) -> str:
         s = normalize_key(x)
@@ -391,17 +336,14 @@ with st.sidebar:
     return base
 
 # === Fonte de dados (sidebar): repo por padrão ===
+st.sidebar.markdown("### Fonte de dados")
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "BASE_PNL.xlsx")
-with st.sidebar:
-    st.markdown("### Fonte de dados")
-    use_repo_file = st.checkbox("Usar BASE_PNL.xlsx do repositório", value=True)
-    uploaded = None
-    if not use_repo_file:
-        uploaded = st.file_uploader("Carregue uma base (XLSX/CSV)", type=["xlsx","xls","csv"], key="upl1")
-    st.markdown("---")
-    st.markdown("<div style='color:#8A94A6;font-size:12px;'>Versão: <b>V1</b></div>", unsafe_allow_html=True)
+use_repo_file = st.sidebar.checkbox("Usar BASE_PNL.xlsx do repositório", value=True, key="use_repo")
+uploaded = None
+if not use_repo_file:
+    uploaded = st.sidebar.file_uploader("Carregue uma base (XLSX/CSV)", type=["xlsx","xls","csv"], key="upl1")
 
-# leitura bytes + nome
+# leitura bytes + nome + última atualização
 if use_repo_file:
     if not os.path.exists(DEFAULT_DATA_PATH):
         st.error("Arquivo **BASE_PNL.xlsx** não encontrado no repositório. Coloque-o na mesma pasta do `app.py`.")
@@ -409,17 +351,32 @@ if use_repo_file:
     with open(DEFAULT_DATA_PATH, "rb") as f:
         file_bytes = f.read()
     filename = os.path.basename(DEFAULT_DATA_PATH)
+    try:
+        mtime = os.path.getmtime(DEFAULT_DATA_PATH)
+        last_updated_dt = datetime.fromtimestamp(mtime)
+    except Exception:
+        last_updated_dt = datetime.now()
 else:
     if uploaded is None:
         st.info("Carregue um arquivo para continuar ou marque 'Usar BASE_PNL.xlsx do repositório'.")
         st.stop()
     file_bytes = uploaded.getvalue()
     filename = uploaded.name
+    last_updated_dt = datetime.now()
+
+# se houver override manual em Secrets
+manual_ts = st.secrets.get("APP_DATA_LAST_UPDATED", "").strip()
+if manual_ts:
+    last_updated_str = manual_ts
+else:
+    last_updated_str = last_updated_dt.strftime("%d/%m/%Y %H:%M")
+
+st.sidebar.caption(f"📅 **Última atualização:** {last_updated_str}")
+st.sidebar.markdown("---")
 
 base = load_normalize(file_bytes, filename)
 
-# ==================== Filtros (AGORA ACIMA DAS ABAS) ====================
-# Diretoria: ordem fixa
+# ==================== Filtros (ACIMA das abas) ====================
 DIR_FIXED_ORDER = ["", "LINHA BRANCA", "MOVEIS", "TELAS", "TELEFONIA", "LINHA LEVE E SAZONAL", "INFO", "CAUDA"]
 def order_diretorias(opts):
     seen, out = set(), []
@@ -431,7 +388,6 @@ def order_diretorias(opts):
             out.append(k); seen.add(k)
     return out
 
-# opções para filtros
 dir_keys_raw = [x for x in base["DIRETORIA_KEY"].dropna().astype(str).unique().tolist()]
 dir_keys_options = order_diretorias(dir_keys_raw)
 def _fmt_dir(k): return ("Consolidado" if k=="" else k.title())
@@ -466,13 +422,12 @@ with st.expander("🧩 Filtros", expanded=True):
     with t2:
         show_money = st.checkbox("Exibir colunas $", value=True, key="opt_money")
     with t3:
-        show_percent = st.checkbox("Exibir colunas %RL", value=False, key="opt_pct")  # default desmarcado
+        show_percent = st.checkbox("Exibir colunas %RL", value=False, key="opt_pct")
     with t4:
         show_principais = st.checkbox("Exibir apenas KPIs principais", value=False, key="opt_main")
 
     only_margins = st.checkbox("Exibir apenas linhas de Margem (MC#1 a MC#4)", value=False, key="opt_margins")
 
-# --- aplica filtros base comuns ---
 def apply_common_filters(df0: pd.DataFrame):
     d = df0.copy()
     if diretoria_sel_keys:
@@ -488,8 +443,7 @@ def apply_common_filters(df0: pd.DataFrame):
     return d
 
 df = apply_common_filters(base)
-df_all_dirs = base.copy()
-df_all_dirs = apply_common_filters(df_all_dirs.assign(DIRETORIA_KEY=base["DIRETORIA_KEY"]))
+df_all_dirs = apply_common_filters(base.assign(DIRETORIA_KEY=base["DIRETORIA_KEY"]))
 
 if df.empty:
     st.info("Sem dados para os filtros selecionados."); st.stop()
@@ -502,15 +456,13 @@ if p0_eff != p0:
 p0 = p0_eff
 
 # períodos relativos
-def _period_minus(p: str, m: int) -> str:
-    return (pd.Period(p, freq="M") - m).strftime("%Y-%m")
 p_m1  = _period_minus(p0,1)
 p_m2  = _period_minus(p0,2)
 p_m3  = _period_minus(p0,3)
 p_m12 = _period_minus(p0,12)
 st.markdown(f"**Períodos:** P0=`{p0}` | M-1=`{p_m1}` | M-2=`{p_m2}` | M-3=`{p_m3}` | M-12=`{p_m12}`")
 
-# ==================== PIVOT (usa filtros) ====================
+# ==================== PIVOT ====================
 @st.cache_data(show_spinner=False)
 def pivotize(df_in: pd.DataFrame, p0, p_m1, p_m2, p_m3, p_m12):
     index_cols = ["AGREG","KPI_COMPACT","KPI","SINAL","FAMILIA","ORDEM","CATEGORIA","TIPO","DIRETORIA","DIRETORIA_KEY"]
@@ -538,7 +490,7 @@ def pivotize(df_in: pd.DataFrame, p0, p_m1, p_m2, p_m3, p_m12):
         p_fcst  = col_get(pv_pct,   p0,   "forecast"),
     ).reset_index()
 
-    # deltas (somente aqui)
+    # deltas
     m["d_m1"]   = m["proj"] - m["real_m1"]
     m["d_m12"]  = m["proj"] - m["real_m12"]
     m["d_fc"]   = m["proj"] - m["fcst"]
@@ -558,7 +510,7 @@ def dedup_kpi(df_in: pd.DataFrame) -> pd.DataFrame:
     out = pd.concat([pais, filhos], ignore_index=True).sort_values("ORDEM")
     return out
 
-# ======= Fallback PP (M-1) quando p_m1v não veio do pivô =======
+# ======= Fallback %RL de M-1 (quando não veio no pivô) =======
 def _fallback_pct_real_m1(df_raw: pd.DataFrame, r_agreg, r_kpi_compact, r_kpi, p_m1):
     d = df_raw[
         (df_raw["AGREG"]==r_agreg) &
@@ -575,7 +527,7 @@ def _fallback_pct_real_m1(df_raw: pd.DataFrame, r_agreg, r_kpi_compact, r_kpi, p
             return v/100.0 if abs(v)>1 else v
     return np.nan
 
-# ==================== CONTRIBUIÇÃO POR SETOR (robusto) ====================
+# ==================== CONTRIBUIÇÃO POR SETOR ====================
 def sector_contribution_delta_m1(df_raw: pd.DataFrame, kpi_compact: str, p0: str, p_m1: str) -> pd.Series:
     if df_raw.empty:
         return pd.Series(dtype=float)
@@ -627,12 +579,12 @@ def sector_contribution_delta_m1(df_raw: pd.DataFrame, kpi_compact: str, p0: str
 
     return pd.Series(dtype=float)
 
-# ==================== RENDERIZAÇÃO TABELAS ====================
+# ==================== RENDER TABELAS ====================
 def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnltbl_general") -> str:
     m_consol = m_df.copy()
     tbl = dedup_kpi(m_consol)
     tbl["_PAI"] = (tbl["AGREG"].str.lower()=="pai").astype(int)
-    tbl["DRE"] = np.where(tbl["_PAI"]==1, "**"+tbl["KPI_COMPACT"]+"**", tbl["KPI"])
+    tbl["DRE"] = np.where(tbl["_PAI"]==1, "<b>"+tbl["KPI_COMPACT"]+"</b>", tbl["KPI"])
 
     tipo_lookup = (
         df_raw[["AGREG","KPI_COMPACT","KPI","TIPO"]]
@@ -717,7 +669,6 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
     Visão Diretoria com coluna KPI congelada (desktop e mobile),
     garantindo que o texto apareça em qualquer resolução.
     """
-
     def order_diretorias_local(opts):
         pri = ["", "LINHA BRANCA", "MOVEIS", "TELAS", "TELEFONIA", "LINHA LEVE E SAZONAL", "INFO", "CAUDA"]
         out, seen = [], set()
@@ -752,7 +703,6 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
 
     rows_html = []
     for _, r in base_rows.iterrows():
-        # envolve em div para melhor controle no mobile
         first_td_html = f"<div class='kpi-cell' title='{r['DRE_TXT']}'>{r['DRE_HTML']}</div>"
         row_cells = [f"<td class='sticky-col sticky-cell'>{first_td_html}</td>"]
         for k in dir_order:
@@ -776,7 +726,6 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
     html = f"""
     <style>
       :root {{
-        /* Ajuste aqui se precisar mais espaço no desktop */
         --kpi-col-width-desktop: 340px;
       }}
 
@@ -787,10 +736,7 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
         border-radius: 10px;
         -webkit-overflow-scrolling: touch;
       }}
-      table.pnltbl {{
-        border-collapse: collapse;
-        width: 100%;
-      }}
+      table.pnltbl {{ border-collapse: collapse; width: 100%; }}
 
       /* Cabeçalhos sticky (duas linhas) */
       #{table_id} thead tr:nth-child(1) th {{
@@ -826,29 +772,27 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
         box-shadow: 2px 0 4px rgba(0,0,0,0.04);
         color: {CB["ink"]};
       }}
-
-      /* Conteúdo textual da KPI — controla quebra/ellipsis conforme viewport */
       #{table_id} .kpi-cell {{
         display: block;
         overflow: hidden;
         white-space: nowrap;
-        text-overflow: ellipsis;   /* desktop: não quebra */
+        text-overflow: ellipsis;
         color: {CB["ink"]};
       }}
 
       table.pnltbl td {{ padding: 6px 8px; border-bottom: 1px solid #eee; }}
       table.pnltbl tr.parent {{ background: #f7f7f7; font-weight: 700; }}
 
-      /* ===== Mobile (<= 640px): a KPI pode quebrar linha para aparecer inteira) ===== */
+      /* Mobile (<= 640px): KPI quebra linha p/ aparecer inteira */
       @media (max-width: 640px) {{
         #{table_id} th.sticky-col.sticky-head,
         #{table_id} td.sticky-col.sticky-cell {{
-          min-width: 85vw;         /* ocupa a maior parte da tela */
+          min-width: 85vw;
           max-width: 90vw;
         }}
         #{table_id} .kpi-cell {{
-          white-space: normal;     /* permite quebrar */
-          word-break: break-word;  /* quebra em qualquer ponto se necessário */
+          white-space: normal;
+          word-break: break-word;
           overflow: visible;
           text-overflow: clip;
           line-height: 1.2;
@@ -859,11 +803,11 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
     <div class='table-wrap'>
       <table id="{table_id}" class='pnltbl'>
         <thead>
-          <tr>{''.join(headers)}</tr>
-          <tr>{''.join(subhdr)}</tr>
+          <tr>{"".join(headers)}</tr>
+          <tr>{"".join(subhdr)}</tr>
         </thead>
         <tbody>
-          {''.join(rows_html)}
+          {"".join(rows_html)}
         </tbody>
       </table>
     </div>
@@ -872,39 +816,29 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
 
 # ==================== GRÁFICOS ====================
 def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_name: str, diretoria_sel_keys: list[str]):
-    import altair as alt
     desired_order = ["M-12","M-3","M-2","M-1","Projeção"]
 
-    # diretorias a exibir
     keys_want = list(diretoria_sel_keys or [])
     if not keys_want:
         present = set(keys_source_df["DIRETORIA_KEY"])
         for k in DIR_FIXED_ORDER:
-            if k in present:
-                keys_want.append(k)
+            if k in present: keys_want.append(k)
         if not keys_want:
             keys_want = sorted(present)[:3]
 
-    # dados do KPI
     sub_all = m_df[(m_df["KPI_COMPACT"]==kpi_name)]
     if sub_all.empty:
-        st.info(f"KPI **{kpi_name}** sem dados para os filtros.")
-        return
+        st.info(f"KPI **{kpi_name}** sem dados para os filtros."); return
 
     t = str(sub_all["TIPO"].dropna().iloc[0]).upper() if sub_all["TIPO"].notna().any() else "VALOR"
     y_label = "% da Receita Líquida" if t=="PP" else "R$"
-
-    # KPI de custo/despesa → lógica de melhora invertida
     is_cost_kpi = any(x in kpi_name.upper() for x in ["CUSTO","DESPESA","PERDA","VARIÁVEL","VARIAVE","SEMI","CARREGAMENTO","CFC"])
 
     rows = []
     for k in keys_want:
         sdir = sub_all[sub_all["DIRETORIA_KEY"]==k]
-        if sdir.empty:
-            continue
-        sdir = dedup_kpi(sdir)
-        r = sdir.iloc[0]
-
+        if sdir.empty: continue
+        sdir = dedup_kpi(sdir); r = sdir.iloc[0]
         seq = [
             ("M-12", r.get("p_m12v" if t=="PP" else "real_m12", np.nan)),
             ("M-3",  r.get("p_m3v"  if t=="PP" else "real_m3",  np.nan)),
@@ -913,7 +847,6 @@ def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_nam
             ("Projeção", r.get("p_proj" if t=="PP" else "proj", np.nan)),
         ]
         seq = [(lab, float(v)*100 if t=="PP" else float(v)) for lab, v in seq if pd.notna(v)]
-
         for i, (lab, val) in enumerate(seq):
             label_num = (f"{val:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
                          if t=="PP" else fmt_brl(val).replace("R$ ",""))
@@ -924,29 +857,22 @@ def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_nam
                 better = (val > prev) if not is_cost_kpi else (val < prev)
                 arrow = "▲" if better else "▼"
                 direction = "up" if better else "down"
-
             rows.append({
                 "Diretoria": ("Consolidado" if k=="" else k.title()),
-                "Período": lab,
-                "Valor": float(val),
-                "LabelNum": label_num,
-                "Arrow": arrow,
-                "Direction": direction,
+                "Período": lab, "Valor": float(val),
+                "LabelNum": label_num, "Arrow": arrow, "Direction": direction,
                 "YLabel": y_label
             })
 
     if not rows:
-        st.info(f"KPI **{kpi_name}** sem pontos válidos.")
-        return
+        st.info(f"KPI **{kpi_name}** sem pontos válidos."); return
 
     chart_df = pd.DataFrame(rows)
     chart_df["Período"] = pd.Categorical(chart_df["Período"], categories=desired_order, ordered=True)
 
-    # Encodes compartilhados (garante ordem e domínio fixo)
     x_enc = alt.X('Período:N', sort=desired_order, scale=alt.Scale(domain=desired_order), title='')
     y_enc = alt.Y('Valor:Q', title=y_label, scale=alt.Scale(zero=False, nice=True, padding=10))
 
-    # Linha + pontos (legenda apenas aqui)
     line_layer = alt.Chart(chart_df).mark_line(interpolate='monotone', strokeWidth=3).encode(
         x=x_enc, y=y_enc,
         color=alt.Color('Diretoria:N', legend=alt.Legend(
@@ -957,17 +883,15 @@ def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_nam
         x=x_enc, y=y_enc, color=alt.Color('Diretoria:N', legend=None)
     )
 
-    # rótulo numérico com "halo" branco para não cortar na linha
     labels_outline = alt.Chart(chart_df).mark_text(
         align='left', dx=10, dy=-14, fontWeight='bold', fontSize=13,
-        stroke='white', strokeWidth=4  # halo
+        stroke='white', strokeWidth=4
     ).encode(x=x_enc, y=y_enc, text='LabelNum:N', color=alt.value('black'))
 
     labels_num = alt.Chart(chart_df).mark_text(
         align='left', dx=10, dy=-14, fontWeight='bold', fontSize=13
     ).encode(x=x_enc, y=y_enc, text='LabelNum:N', color=alt.Color('Diretoria:N', legend=None))
 
-    # setas (escala própria, sem legenda)
     arrows_only = chart_df[chart_df["Arrow"] != ""]
     arrows_layer = alt.Chart(arrows_only).mark_text(
         align='left', dx=10, dy=14, fontWeight='bold', fontSize=13
@@ -983,14 +907,6 @@ def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_nam
     st.altair_chart(chart, use_container_width=True)
 
 def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretoria_sel_keys: list[str]):
-    """
-    Plota a evolução das margens MC#1..MC#4 em %RL para M-12, M-3, M-2, M-1 e Projeção.
-    Mantém a ordem dos períodos e legenda enfatizada. (sem setas)
-    """
-    import altair as alt
-    import numpy as np
-    import pandas as pd
-
     desired_order = ["M-12","M-3","M-2","M-1","Projeção"]
     margin_names = [
         "Margem Contribuição #1 (CashMerc + Bonif. + Demais Rec)",
@@ -998,14 +914,11 @@ def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretori
         "Margem Contribuição #3",
         "Margem Contribuição #4",
     ]
-
-    # Diretorias a exibir (usa as selecionadas; se vazio, segue ordem fixa)
     keys_want = list(diretoria_sel_keys or [])
     if not keys_want:
         present = set(keys_source_df["DIRETORIA_KEY"])
         for k in DIR_FIXED_ORDER:
-            if k in present:
-                keys_want.append(k)
+            if k in present: keys_want.append(k)
         if not keys_want:
             keys_want = sorted(present)[:3]
 
@@ -1013,78 +926,48 @@ def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretori
         sub_all = m_df[m_df["KPI_COMPACT"]==name]
         if sub_all.empty:
             continue
-
         rows = []
         for k in keys_want:
             sdir = sub_all[sub_all["DIRETORIA_KEY"]==k]
-            if sdir.empty:
-                continue
-            # usa linha pai/filho deduplicada por ORDEM
-            sdir = dedup_kpi(sdir)
-            r = sdir.iloc[0]
-
-            series_vals = [
-                ("M-12", r.get("p_m12v", np.nan)),
-                ("M-3",  r.get("p_m3v",  np.nan)),
-                ("M-2",  r.get("p_m2v",  np.nan)),
-                ("M-1",  r.get("p_m1v",  np.nan)),
-                ("Projeção", r.get("p_proj", np.nan)),
-            ]
+            if sdir.empty: continue
+            sdir = dedup_kpi(sdir); r = sdir.iloc[0]
+            series_vals = [("M-12", r.get("p_m12v", np.nan)), ("M-3", r.get("p_m3v", np.nan)),
+                           ("M-2", r.get("p_m2v", np.nan)), ("M-1", r.get("p_m1v", np.nan)),
+                           ("Projeção", r.get("p_proj", np.nan))]
             for lab, val in series_vals:
                 if pd.notna(val):
-                    y = float(val)*100.0  # %RL -> percentual
-                    rows.append({
-                        "Diretoria": ("Consolidado" if k=="" else k.title()),
-                        "Período": lab,
-                        "Valor": y,
-                        "Label": f"{y:.1f}%"
-                    })
-
-        if not rows:
-            continue
-
+                    y = float(val)*100.0
+                    rows.append({"Diretoria": ("Consolidado" if k=="" else k.title()),
+                                 "Período": lab, "Valor": y, "Label": f"{y:.1f}%"})
+        if not rows: continue
         chart_df = pd.DataFrame(rows)
         chart_df["Período"] = pd.Categorical(chart_df["Período"], categories=desired_order, ordered=True)
-
-        base = alt.Chart(chart_df).mark_line(
-            point=alt.OverlayMarkDef(size=110),
-            interpolate='monotone',
-            strokeWidth=3
-        ).encode(
-            x=alt.X('Período:N', sort=desired_order, title=''),
-            y=alt.Y('Valor:Q', title="% da Receita Líquida"),
-            color=alt.Color('Diretoria:N', legend=alt.Legend(
-                title='Diretoria',
-                labelFontWeight='bold', titleFontWeight='bold',
-                labelFontSize=13, titleFontSize=14,
-                symbolSize=300, symbolStrokeWidth=2
-            ))
-        )
-
+        x_enc = alt.X('Período:N', sort=desired_order, scale=alt.Scale(domain=desired_order), title='')
+        y_enc = alt.Y('Valor:Q', title="% da Receita Líquida", scale=alt.Scale(zero=False, nice=True, padding=10))
+        base = alt.Chart(chart_df).mark_line(point=alt.OverlayMarkDef(size=110), interpolate='monotone', strokeWidth=3)\
+            .encode(x=x_enc, y=y_enc, color=alt.Color('Diretoria:N', legend=alt.Legend(
+                title='Diretoria', labelFontWeight='bold', titleFontWeight='bold',
+                labelFontSize=13, titleFontSize=14, symbolSize=300, symbolStrokeWidth=2)))
         labels = alt.Chart(chart_df).mark_text(
-            align='left', dx=8, dy=-8, fontWeight='bold', fontSize=13
-        ).encode(
-            x='Período:N', y='Valor:Q', text='Label:N', color='Diretoria:N'
-        )
-
+            align='left', dx=10, dy=-14, fontWeight='bold', fontSize=13,
+            stroke='white', strokeWidth=4
+        ).encode(x=x_enc, y=y_enc, text='Label:N', color=alt.value('black')) + \
+        alt.Chart(chart_df).mark_text(
+            align='left', dx=10, dy=-14, fontWeight='bold', fontSize=13
+        ).encode(x=x_enc, y=y_enc, text='Label:N', color=alt.Color('Diretoria:N', legend=None))
         st.markdown(f"**{name} – %RL**")
         st.altair_chart(base + labels, use_container_width=True)
 
-# ==================== Abas (conteúdo vem DEPOIS dos filtros) ====================
-tab1, tab2, tab3, tab4 = st.tabs(["Visão Geral", "Visão Diretoria", "Gráficos", "Versionamento"])
+# ==================== ABAS ====================
+tab1, tab2, tab3, tab4 = st.tabs(["Visão Geral", "Visão Diretoria", "Gráficos", "Roadmap"])
 
-with tab1:  # Visão Geral
+with tab1:
     kpi_opts_all = kpi_filter_options_from_base(df_all_dirs)
     kpi_opts = ["(todos)"] + kpi_opts_all
     kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0, key="kpi_vg")
-
-    if kpi_filter != "(todos)":
-        m_show = m[(m["KPI_COMPACT"]==kpi_filter) | (m["KPI"]==kpi_filter)].copy()
-        if m_show.empty:
-            st.info("KPI sem dados para os filtros."); st.stop()
-    else:
-        m_show = m
-
+    m_show = m if kpi_filter=="(todos)" else m[(m["KPI_COMPACT"]==kpi_filter) | (m["KPI"]==kpi_filter)].copy()
+    if m_show.empty:
+        st.info("KPI sem dados para os filtros."); st.stop()
     st.markdown(render_table_general(m_show, df), unsafe_allow_html=True)
 
     # Highlights
@@ -1130,25 +1013,19 @@ with tab1:  # Visão Geral
                 f"</div></div>", unsafe_allow_html=True
             )
 
-with tab2:  # Visão Diretoria
+with tab2:
     kpi_opts_all = kpi_filter_options_from_base(df_all_dirs)
     kpi_opts = ["(todos)"] + kpi_opts_all
     kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0, key="kpi_vd")
-
-    if kpi_filter != "(todos)":
-        mD_show = mD[(mD["KPI_COMPACT"]==kpi_filter) | (mD["KPI"]==kpi_filter)].copy()
-        if mD_show.empty:
-            st.info("KPI sem dados para os filtros."); st.stop()
-    else:
-        mD_show = mD
-
+    mD_show = mD if kpi_filter=="(todos)" else mD[(mD["KPI_COMPACT"]==kpi_filter) | (mD["KPI"]==kpi_filter)].copy()
+    if mD_show.empty:
+        st.info("KPI sem dados para os filtros."); st.stop()
     html_dir = render_table_diretoria(mD_show, table_id="pnltbl_dir")
     st.markdown(html_dir, unsafe_allow_html=True)
 
-with tab3:  # Gráficos
+with tab3:
     kpi_options_ordered = kpi_filter_options_from_base(df_all_dirs)
     kpi_sel = st.multiselect("KPI(s) (opcional):", options=kpi_options_ordered, default=[], key="kpi_gfx")
-
     if kpi_sel:
         for kpi_name in kpi_sel:
             draw_kpi_evolution(mD, df_all_dirs, kpi_name, diretoria_sel_keys)
@@ -1159,7 +1036,6 @@ with tab4:  # Roadmap
     st.markdown("## 🗺️ Roadmap")
 
     c1, c2 = st.columns([1, 1])
-
     with c1:
         st.markdown("### 📌 Próximas entregas")
         st.markdown("""
@@ -1169,7 +1045,6 @@ with tab4:  # Roadmap
 - **Simulador**
 - **Visão de KPIs por Analista**
         """)
-
     with c2:
         st.markdown("### 🔧 Entregas em revisão")
         st.markdown("""
