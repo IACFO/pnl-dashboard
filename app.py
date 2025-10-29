@@ -630,59 +630,93 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnl
     html = f"<div class='table-wrap'><table id='{table_id}' class='pnltbl'><thead><tr>{headers}</tr></thead><tbody>{''.join(rows_html)}</tbody></table></div>"
     return html
 
-def render_table_diretoria(m_df: pd.DataFrame, table_id="pnltbl_dir") -> str:
-    all_keys = [x for x in m_df["DIRETORIA_KEY"].fillna("").astype(str).unique().tolist()]
-    def order_diretorias_local(opts):
-        seen, out = set(), []
-        for k in DIR_FIXED_ORDER:
-            if k in opts and k not in seen:
-                out.append(k); seen.add(k)
-        for k in sorted(opts):
-            if k not in seen:
-                out.append(k); seen.add(k)
-        return out
-    dir_order = order_diretorias_local(all_keys)
+def render_table_diretoria(m_df: pd.DataFrame) -> str:
+    """
+    Renderiza a tabela da aba 'Visão Diretoria' com congelamento da coluna KPI (DRE).
+    """
+    # ordena diretorias (Consolidado, Linha Branca, Moveis, Telas, Telefonia, Linha Leve E Sazonal, Info, Cauda)
+    dir_order = []
+    all_dirs = m_df["DIRETORIA"].fillna("").astype(str).unique().tolist()
+    priors = ["CONSOLIDADO","LINHA BRANCA","MOVEIS","TELAS","TELEFONIA","LINHA LEVE E SAZONAL","INFO","CAUDA"]
+    for p in priors:
+        if p in all_dirs:
+            dir_order.append(p)
+    for d in sorted(all_dirs):
+        if d not in dir_order:
+            dir_order.append(d)
 
-    key_to_label = (
-        m_df[["DIRETORIA_KEY","DIRETORIA"]]
-        .drop_duplicates()
-        .set_index("DIRETORIA_KEY")["DIRETORIA"]
-        .to_dict()
-    )
-    def disp_label(k):
-        return "Consolidado" if k=="" else (key_to_label.get(k) or k).title()
-
+    # base de linhas (dedup por KPI)
     base_rows = dedup_kpi(m_df)
     base_rows["_PAI"] = (base_rows["AGREG"].str.lower()=="pai").astype(int)
     base_rows["DRE"] = np.where(base_rows["_PAI"]==1, "**"+base_rows["KPI_COMPACT"]+"**", base_rows["KPI"])
 
-    headers = ["<th>KPI</th>"] + [f"<th colspan='2'>{disp_label(k)}</th>" for k in dir_order]
-    subhdr  = ["<th></th>"] + sum([[f"<th>Projeção</th>", f"<th>Δ vs M-1</th>"] for _ in dir_order], [])
+    # constrói a tabela HTML
+    headers = ["<th class='sticky-col'>KPI</th>"] + [f"<th colspan='2'>{(d or 'Consolidado').title()}</th>" for d in dir_order]
+    subhdr  = ["<th class='sticky-col'></th>"] + sum([[f"<th>Projeção</th>", f"<th>Δ vs M-1</th>"] for _ in dir_order], [])
 
     rows_html = []
     for _, r in base_rows.iterrows():
-        row = [f"<td>{r['DRE']}</td>"]
-        for k in dir_order:
-            sub = m_df[
-                (m_df["AGREG"]==r["AGREG"]) &
-                (m_df["KPI_COMPACT"]==r["KPI_COMPACT"]) &
-                (m_df["KPI"]==r["KPI"]) &
-                (m_df["DIRETORIA_KEY"]==k)
-            ]
+        row = [f"<td class='sticky-col'>{r['DRE']}</td>"]
+        for d in dir_order:
+            sub = m_df[(m_df["AGREG"]==r["AGREG"]) & (m_df["KPI_COMPACT"]==r["KPI_COMPACT"]) &
+                       (m_df["KPI"]==r["KPI"]) & (m_df["DIRETORIA"]==d)]
             if sub.empty:
                 row += ["<td></td>", "<td></td>"]
             else:
-                t = str(sub["TIPO"].iloc[0]).upper()
                 v_proj = sub["proj"].iloc[0]
                 v_dm1  = sub["d_m1"].iloc[0]
+                t = str(sub["TIPO"].iloc[0]).upper()
                 proj_txt = fmt_pp_value(sub["p_proj"].iloc[0]) if t=="PP" else fmt_brl(v_proj)
                 dm1_txt  = decorate_delta_pp_plain(v_dm1) if t=="PP" else decorate_delta_money(v_dm1)
                 row += [f"<td>{proj_txt}</td>", f"<td>{dm1_txt}</td>"]
-        rows_html.append(f"<tr>{''.join(row)}</tr>")
+        rows_html.append(f"<tr class='{'parent' if r['_PAI']==1 else ''}'>{''.join(row)}</tr>")
 
     html = f"""
+    <style>
+        .table-wrap {{
+            max-height: 70vh;
+            overflow: auto;
+            border: 1px solid #e9edf4;
+            border-radius: 10px;
+        }}
+        table.pnltbl {{
+            border-collapse: collapse;
+            width: 100%;
+            table-layout: fixed;
+        }}
+        table.pnltbl th {{
+            position: sticky;
+            top: 0;
+            background: #0033A0;
+            color: #fff;
+            font-weight: 700;
+            padding: 8px;
+            border-bottom: 1px solid #d0d7de;
+            z-index: 3;
+        }}
+        .sticky-col {{
+            position: sticky;
+            left: 0;
+            background: #fff;
+            z-index: 4;
+            border-right: 1px solid #ddd;
+            box-shadow: 2px 0 4px rgba(0,0,0,0.05);
+            min-width: 240px;
+            max-width: 300px;
+            white-space: nowrap;
+        }}
+        table.pnltbl td {{
+            padding: 6px 8px;
+            border-bottom: 1px solid #eee;
+        }}
+        table.pnltbl tr.parent {{
+            background: #f7f7f7;
+            font-weight: 700;
+        }}
+    </style>
+
     <div class='table-wrap'>
-      <table id="{table_id}" class='pnltbl'>
+      <table class='pnltbl'>
         <thead>
           <tr>{''.join(headers)}</tr>
           <tr>{''.join(subhdr)}</tr>
