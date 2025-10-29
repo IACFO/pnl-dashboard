@@ -16,49 +16,56 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 # --- Auth simples por senha única ---
 def require_password():
-    # já autenticado -> mostra botão sair e segue
-    if st.session_state.get("auth_ok", False):
-        with st.sidebar:
-            if st.button("Sair"):
-                st.session_state["auth_ok"] = False
-                # limpa qualquer resíduo do input
-                st.session_state.pop("__pwd", None)
-                # rerun compatível
-                if hasattr(st, "rerun"):
-                    st.rerun()
-                else:
-                    try:
-                        st.experimental_rerun()
-                    except Exception:
-                        pass
-        return
-
-    st.markdown("### 🔒 Acesso restrito")
-    pwd = st.text_input("Digite a senha para acessar:", type="password", key="__pwd")
-    submitted = st.button("Entrar", use_container_width=True)
-
-    if submitted:
-        secret_pwd = st.secrets.get("APP_PASSWORD", "")
-        if pwd and secret_pwd and pwd == secret_pwd:
-            st.session_state["auth_ok"] = True
-            # remove o valor da senha da memória
-            st.session_state.pop("__pwd", None)
-            # rerun compatível (para limpar a tela de login sem erro)
-            if hasattr(st, "rerun"):
-                st.rerun()
-            else:
-                try:
-                    st.experimental_rerun()
-                except Exception:
-                    # se der erro no Cloud, apenas segue sem rerun
-                    pass
-            return
+    # logout por querystring (ex.: ?logout=1)
+    qs = st.experimental_get_query_params()
+    if qs.get("logout", ["0"])[0] == "1":
+        st.session_state.clear()
+        if hasattr(st, "rerun"): st.rerun()
         else:
-            st.error("Senha inválida.")
-            st.stop()
+            try: st.experimental_rerun()
+            except Exception: pass
 
-    # bloqueia o resto do app até logar
-    st.stop()
+    # força a existência da senha nos secrets
+    secret_pwd = st.secrets.get("APP_PASSWORD", "").strip()
+    if not secret_pwd:
+        st.error("Senha de acesso não configurada (APP_PASSWORD).")
+        st.stop()
+
+    # estado local da sessão (não global do app)
+    authed = st.session_state.get("auth_ok", False)
+
+    if not authed:
+        st.markdown("### 🔒 Acesso restrito")
+        pwd = st.text_input("Digite a senha para acessar:", type="password", key="__pwd")
+        submit = st.button("Entrar", use_container_width=True)
+        if submit:
+            if pwd == secret_pwd:
+                # marca sessão atual como autenticada
+                st.session_state["auth_ok"] = True
+                st.session_state.pop("__pwd", None)
+                if hasattr(st, "rerun"): st.rerun()
+                else:
+                    try: st.experimental_rerun()
+                    except Exception: pass
+                return
+            else:
+                st.error("Senha inválida.")
+                st.stop()
+        st.stop()
+
+    # já autenticado -> mostra botão sair
+    with st.sidebar:
+        if st.button("Sair"):
+            st.session_state.clear()
+            # adiciona logout=1 para garantir limpeza em qualquer client
+            st.experimental_set_query_params(logout="1")
+            if hasattr(st, "rerun"): st.rerun()
+            else:
+                try: st.experimental_rerun()
+                except Exception: pass
+
+# >>> CHAME AQUI, logo após os imports:
+require_password()
 
 # ==================== VISUAL / CSS ====================
 CB = {
