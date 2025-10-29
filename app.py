@@ -103,7 +103,6 @@ def _norm_key(s: str) -> str:
     return remove_accents(str(s)).strip().upper()
 
 KPI_MASTER_LIST = [
-    # (lista fornecida por você – mantida para completar filtros quando faltar algo na base)
     "GMV TOTAL","GMV RECEITA DE MERCADORIA","GMV RECEITA DE FRETE","GMV RECEITA DE SERVIÇO",
     "GMV REPASSE SERVIÇOS","GMV COMISSÃO 3P","GMV RECEITA DE CREDIÁRIO","GMV RECEITA DE CARTÕES",
     "GMV RECEITA DE MONTAGEM","GMV RECEITA DE MERCADORIA","GMV RECEITA DE ADS","GMV WRITE OFF CREDIÁRIO",
@@ -226,7 +225,6 @@ def kpi_order_map(df_src: pd.DataFrame) -> dict:
         return {}
     tmp = df_src[["KPI_COMPACT","ORDEM"]].dropna(subset=["KPI_COMPACT"]).copy()
     tmp["ORDEM"] = pd.to_numeric(tmp["ORDEM"], errors="coerce")
-    # pega a menor ORDEM por KPI (como seu exemplo)
     m = tmp.groupby("KPI_COMPACT", dropna=True)["ORDEM"].min().to_dict()
     return m
 
@@ -242,7 +240,6 @@ def kpi_filter_options_from_base(df_src: pd.DataFrame) -> list[str]:
         ord_map = {}
     else:
         ord_map = kpi_order_map(df_src)
-        # mantém ordem de primeira ocorrência e evita set (que desordena)
         base_names = (
             df_src["KPI_COMPACT"]
             .dropna().astype(str)
@@ -311,7 +308,7 @@ def load_normalize(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
     return base
 
-# === Fonte de dados: arquivo do repositório por padrão (sidebar apenas p/ fonte + versão) ===
+# === Fonte de dados (sidebar): repo por padrão ===
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "BASE_PNL.xlsx")
 with st.sidebar:
     st.markdown("### Fonte de dados")
@@ -339,10 +336,7 @@ else:
 
 base = load_normalize(file_bytes, filename)
 
-# ==================== Abas (topo) ====================
-tab1, tab2, tab3, tab4 = st.tabs(["Visão Geral", "Visão Diretoria", "Gráficos", "Versionamento"])
-
-# ==================== Filtros (expander comum – melhor mobile) ====================
+# ==================== Filtros (AGORA ACIMA DAS ABAS) ====================
 # Diretoria: ordem fixa
 DIR_FIXED_ORDER = ["", "LINHA BRANCA", "MOVEIS", "TELAS", "TELEFONIA", "LINHA LEVE E SAZONAL", "INFO", "CAUDA"]
 def order_diretorias(opts):
@@ -413,7 +407,7 @@ def apply_common_filters(df0: pd.DataFrame):
 
 df = apply_common_filters(base)
 df_all_dirs = base.copy()
-df_all_dirs = apply_common_filters(df_all_dirs.assign(DIRETORIA_KEY=base["DIRETORIA_KEY"]))  # aplica BU/Setor/etc., mas mantém todas diretorias caso precise
+df_all_dirs = apply_common_filters(df_all_dirs.assign(DIRETORIA_KEY=base["DIRETORIA_KEY"]))
 
 if df.empty:
     st.info("Sem dados para os filtros selecionados."); st.stop()
@@ -426,13 +420,15 @@ if p0_eff != p0:
 p0 = p0_eff
 
 # períodos relativos
+def _period_minus(p: str, m: int) -> str:
+    return (pd.Period(p, freq="M") - m).strftime("%Y-%m")
 p_m1  = _period_minus(p0,1)
 p_m2  = _period_minus(p0,2)
 p_m3  = _period_minus(p0,3)
 p_m12 = _period_minus(p0,12)
 st.markdown(f"**Períodos:** P0=`{p0}` | M-1=`{p_m1}` | M-2=`{p_m2}` | M-3=`{p_m3}` | M-12=`{p_m12}`")
 
-# ==================== PIVOT ====================
+# ==================== PIVOT (usa filtros) ====================
 @st.cache_data(show_spinner=False)
 def pivotize(df_in: pd.DataFrame, p0, p_m1, p_m2, p_m3, p_m12):
     index_cols = ["AGREG","KPI_COMPACT","KPI","SINAL","FAMILIA","ORDEM","CATEGORIA","TIPO","DIRETORIA","DIRETORIA_KEY"]
@@ -460,7 +456,7 @@ def pivotize(df_in: pd.DataFrame, p0, p_m1, p_m2, p_m3, p_m12):
         p_fcst  = col_get(pv_pct,   p0,   "forecast"),
     ).reset_index()
 
-    # deltas (somente calculadas aqui)
+    # deltas (somente aqui)
     m["d_m1"]   = m["proj"] - m["real_m1"]
     m["d_m12"]  = m["proj"] - m["real_m12"]
     m["d_fc"]   = m["proj"] - m["fcst"]
@@ -499,13 +495,6 @@ def _fallback_pct_real_m1(df_raw: pd.DataFrame, r_agreg, r_kpi_compact, r_kpi, p
 
 # ==================== CONTRIBUIÇÃO POR SETOR (robusto) ====================
 def sector_contribution_delta_m1(df_raw: pd.DataFrame, kpi_compact: str, p0: str, p_m1: str) -> pd.Series:
-    """
-    Retorna contribuição por CATEGORIA do gap (Projeção - Real M-1) do KPI pai.
-    Estratégia:
-      1) Consolidado (DIR in {"", CONSOLIDADO, TOTAL}) + filhos
-      2) Consolidado + pais
-      3) Todas diretorias + filhos; se vazio, todas diretorias + pais
-    """
     if df_raw.empty:
         return pd.Series(dtype=float)
 
@@ -538,19 +527,16 @@ def sector_contribution_delta_m1(df_raw: pd.DataFrame, kpi_compact: str, p0: str
     cons_keys = {"", "CONSOLIDADO", "TOTAL"}
     have_cons = d0["DIR_KEY_N"].isin(cons_keys).any()
 
-    # 1) consolidado + filhos
     if have_cons:
         s = _make_series(d0[d0["DIR_KEY_N"].isin(cons_keys) & (d0["AGREG_N"]=="filho")])
         if not s.empty:
             return s.sort_values(ascending=True) if (s<0).any() else s.reindex(s.abs().sort_values(ascending=False).index)
 
-    # 2) consolidado + pais
     if have_cons:
         s = _make_series(d0[d0["DIR_KEY_N"].isin(cons_keys) & (d0["AGREG_N"]=="pai")])
         if not s.empty:
             return s.sort_values(ascending=True) if (s<0).any() else s.reindex(s.abs().sort_values(ascending=False).index)
 
-    # 3) todas diretorias + filhos (ou pais)
     s = _make_series(d0[d0["AGREG_N"]=="filho"])
     if s.empty:
         s = _make_series(d0[d0["AGREG_N"]=="pai"])
@@ -646,7 +632,6 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnl
 
 def render_table_diretoria(m_df: pd.DataFrame, table_id="pnltbl_dir") -> str:
     all_keys = [x for x in m_df["DIRETORIA_KEY"].fillna("").astype(str).unique().tolist()]
-    # ordem fixa
     def order_diretorias_local(opts):
         seen, out = set(), []
         for k in DIR_FIXED_ORDER:
@@ -712,70 +697,125 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id="pnltbl_dir") -> str:
 
 # ==================== GRÁFICOS ====================
 def draw_kpi_evolution(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, kpi_name: str, diretoria_sel_keys: list[str]):
+    import altair as alt
     desired_order = ["M-12","M-3","M-2","M-1","Projeção"]
+
     # diretorias a exibir
     keys_want = list(diretoria_sel_keys or [])
     if not keys_want:
+        present = set(keys_source_df["DIRETORIA_KEY"])
         for k in DIR_FIXED_ORDER:
-            if k in set(keys_source_df["DIRETORIA_KEY"]):
+            if k in present:
                 keys_want.append(k)
         if not keys_want:
-            keys_want = sorted(keys_source_df["DIRETORIA_KEY"].dropna().unique().tolist())[:3]
+            keys_want = sorted(present)[:3]
 
+    # dados do KPI
     sub_all = m_df[(m_df["KPI_COMPACT"]==kpi_name)]
     if sub_all.empty:
-        st.info(f"KPI **{kpi_name}** sem dados para os filtros."); return
+        st.info(f"KPI **{kpi_name}** sem dados para os filtros.")
+        return
 
     t = str(sub_all["TIPO"].dropna().iloc[0]).upper() if sub_all["TIPO"].notna().any() else "VALOR"
     y_label = "% da Receita Líquida" if t=="PP" else "R$"
 
+    # KPI de custo/despesa → lógica de melhora invertida
+    is_cost_kpi = any(x in kpi_name.upper() for x in ["CUSTO","DESPESA","PERDA","VARIÁVEL","VARIAVE","SEMI","CARREGAMENTO","CFC"])
+
     rows = []
     for k in keys_want:
         sdir = sub_all[sub_all["DIRETORIA_KEY"]==k]
-        if sdir.empty: continue
-        sdir = dedup_kpi(sdir); r = sdir.iloc[0]
-        series_vals = [
+        if sdir.empty:
+            continue
+        sdir = dedup_kpi(sdir)
+        r = sdir.iloc[0]
+
+        seq = [
             ("M-12", r.get("p_m12v" if t=="PP" else "real_m12", np.nan)),
             ("M-3",  r.get("p_m3v"  if t=="PP" else "real_m3",  np.nan)),
             ("M-2",  r.get("p_m2v"  if t=="PP" else "real_m2",  np.nan)),
             ("M-1",  r.get("p_m1v"  if t=="PP" else "real_m1",  np.nan)),
             ("Projeção", r.get("p_proj" if t=="PP" else "proj", np.nan)),
         ]
-        for lab, val in series_vals:
-            if pd.notna(val):
-                y = float(val)*100.0 if t=="PP" else float(val)
-                label = f"{y:.1f}%" if t=="PP" else f"{fmt_brl(y)}".replace("R$ ","")
-                rows.append({"Diretoria": ("Consolidado" if k=="" else k.title()), "Período": lab, "Valor": y, "YLabel": y_label, "Label": label})
+        seq = [(lab, float(v)*100 if t=="PP" else float(v)) for lab, v in seq if pd.notna(v)]
+
+        for i, (lab, val) in enumerate(seq):
+            label_num = (f"{val:,.1f}%".replace(",", "X").replace(".", ",").replace("X", ".")
+                         if t=="PP" else fmt_brl(val).replace("R$ ",""))
+            if i == 0:
+                arrow, direction = "", ""
+            else:
+                prev = seq[i-1][1]
+                better = (val > prev) if not is_cost_kpi else (val < prev)
+                arrow = "▲" if better else "▼"
+                direction = "up" if better else "down"
+
+            rows.append({
+                "Diretoria": ("Consolidado" if k=="" else k.title()),
+                "Período": lab,
+                "Valor": float(val),
+                "LabelNum": label_num,
+                "Arrow": arrow,
+                "Direction": direction,
+                "YLabel": y_label
+            })
+
     if not rows:
-        st.info(f"KPI **{kpi_name}** sem pontos válidos."); return
+        st.info(f"KPI **{kpi_name}** sem pontos válidos.")
+        return
 
     chart_df = pd.DataFrame(rows)
     chart_df["Período"] = pd.Categorical(chart_df["Período"], categories=desired_order, ordered=True)
 
-    base = alt.Chart(chart_df).mark_line(
-        point=alt.OverlayMarkDef(size=110),
-        interpolate='monotone',
-        strokeWidth=3
-    ).encode(
-        x=alt.X('Período', sort=desired_order, title=''),
-        y=alt.Y('Valor:Q', title=y_label),
-        color=alt.Color('Diretoria:N',
-                        legend=alt.Legend(
-                            title='Diretoria',
-                            labelFontWeight='bold', titleFontWeight='bold',
-                            labelFontSize=13, titleFontSize=14,
-                            symbolSize=300, symbolStrokeWidth=2
-                        ))
+    # Encodes compartilhados (garante ordem e domínio fixo)
+    x_enc = alt.X('Período:N', sort=desired_order, scale=alt.Scale(domain=desired_order), title='')
+    y_enc = alt.Y('Valor:Q', title=y_label, scale=alt.Scale(zero=False, nice=True, padding=10))
+
+    # Linha + pontos (legenda apenas aqui)
+    line_layer = alt.Chart(chart_df).mark_line(interpolate='monotone', strokeWidth=3).encode(
+        x=x_enc, y=y_enc,
+        color=alt.Color('Diretoria:N', legend=alt.Legend(
+            title='Diretoria', labelFontWeight='bold', titleFontWeight='bold',
+            labelFontSize=13, titleFontSize=14, symbolSize=300, symbolStrokeWidth=2))
     )
-    labels = alt.Chart(chart_df).mark_text(
-        align='left', dx=8, dy=-8, fontWeight='bold', fontSize=13
-    ).encode(
-        x='Período', y='Valor:Q', text=alt.Text('Label'), color='Diretoria:N'
+    points_layer = alt.Chart(chart_df).mark_point(size=110).encode(
+        x=x_enc, y=y_enc, color=alt.Color('Diretoria:N', legend=None)
     )
+
+    # rótulo numérico com "halo" branco para não cortar na linha
+    labels_outline = alt.Chart(chart_df).mark_text(
+        align='left', dx=10, dy=-14, fontWeight='bold', fontSize=13,
+        stroke='white', strokeWidth=4  # halo
+    ).encode(x=x_enc, y=y_enc, text='LabelNum:N', color=alt.value('black'))
+
+    labels_num = alt.Chart(chart_df).mark_text(
+        align='left', dx=10, dy=-14, fontWeight='bold', fontSize=13
+    ).encode(x=x_enc, y=y_enc, text='LabelNum:N', color=alt.Color('Diretoria:N', legend=None))
+
+    # setas (escala própria, sem legenda)
+    arrows_only = chart_df[chart_df["Arrow"] != ""]
+    arrows_layer = alt.Chart(arrows_only).mark_text(
+        align='left', dx=10, dy=14, fontWeight='bold', fontSize=13
+    ).encode(
+        x=x_enc, y=y_enc, text='Arrow:N',
+        color=alt.Color('Direction:N', scale=alt.Scale(domain=['up','down'], range=['green','red']), legend=None)
+    )
+
+    chart = alt.layer(line_layer, points_layer, labels_outline, labels_num, arrows_layer)\
+               .resolve_scale(color='independent')
+
     st.markdown(f"**{kpi_name} – Evolução**")
-    st.altair_chart(base + labels, use_container_width=True)
+    st.altair_chart(chart, use_container_width=True)
 
 def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretoria_sel_keys: list[str]):
+    """
+    Plota a evolução das margens MC#1..MC#4 em %RL para M-12, M-3, M-2, M-1 e Projeção.
+    Mantém a ordem dos períodos e legenda enfatizada. (sem setas)
+    """
+    import altair as alt
+    import numpy as np
+    import pandas as pd
+
     desired_order = ["M-12","M-3","M-2","M-1","Projeção"]
     margin_names = [
         "Margem Contribuição #1 (CashMerc + Bonif. + Demais Rec)",
@@ -783,57 +823,86 @@ def draw_margin_block(m_df: pd.DataFrame, keys_source_df: pd.DataFrame, diretori
         "Margem Contribuição #3",
         "Margem Contribuição #4",
     ]
+
+    # Diretorias a exibir (usa as selecionadas; se vazio, segue ordem fixa)
     keys_want = list(diretoria_sel_keys or [])
     if not keys_want:
+        present = set(keys_source_df["DIRETORIA_KEY"])
         for k in DIR_FIXED_ORDER:
-            if k in set(keys_source_df["DIRETORIA_KEY"]): keys_want.append(k)
+            if k in present:
+                keys_want.append(k)
         if not keys_want:
-            keys_want = sorted(keys_source_df["DIRETORIA_KEY"].dropna().unique().tolist())[:3]
+            keys_want = sorted(present)[:3]
 
     for name in margin_names:
         sub_all = m_df[m_df["KPI_COMPACT"]==name]
         if sub_all.empty:
             continue
+
         rows = []
         for k in keys_want:
             sdir = sub_all[sub_all["DIRETORIA_KEY"]==k]
-            if sdir.empty: continue
-            sdir = dedup_kpi(sdir); r = sdir.iloc[0]
-            series_vals = [("M-12", r.get("p_m12v", np.nan)), ("M-3", r.get("p_m3v", np.nan)),
-                           ("M-2", r.get("p_m2v", np.nan)), ("M-1", r.get("p_m1v", np.nan)),
-                           ("Projeção", r.get("p_proj", np.nan))]
+            if sdir.empty:
+                continue
+            # usa linha pai/filho deduplicada por ORDEM
+            sdir = dedup_kpi(sdir)
+            r = sdir.iloc[0]
+
+            series_vals = [
+                ("M-12", r.get("p_m12v", np.nan)),
+                ("M-3",  r.get("p_m3v",  np.nan)),
+                ("M-2",  r.get("p_m2v",  np.nan)),
+                ("M-1",  r.get("p_m1v",  np.nan)),
+                ("Projeção", r.get("p_proj", np.nan)),
+            ]
             for lab, val in series_vals:
                 if pd.notna(val):
-                    y = float(val)*100.0
-                    rows.append({"Diretoria": ("Consolidado" if k=="" else k.title()), "Período": lab,
-                                 "Valor": y, "YLabel": "% da Receita Líquida", "Label": f"{y:.1f}%"})
+                    y = float(val)*100.0  # %RL -> percentual
+                    rows.append({
+                        "Diretoria": ("Consolidado" if k=="" else k.title()),
+                        "Período": lab,
+                        "Valor": y,
+                        "Label": f"{y:.1f}%"
+                    })
+
         if not rows:
             continue
+
         chart_df = pd.DataFrame(rows)
         chart_df["Período"] = pd.Categorical(chart_df["Período"], categories=desired_order, ordered=True)
+
         base = alt.Chart(chart_df).mark_line(
-            point=alt.OverlayMarkDef(size=110), interpolate='monotone', strokeWidth=3
+            point=alt.OverlayMarkDef(size=110),
+            interpolate='monotone',
+            strokeWidth=3
         ).encode(
-            x=alt.X('Período', sort=desired_order, title=''),
+            x=alt.X('Período:N', sort=desired_order, title=''),
             y=alt.Y('Valor:Q', title="% da Receita Líquida"),
             color=alt.Color('Diretoria:N', legend=alt.Legend(
-                title='Diretoria', labelFontWeight='bold', titleFontWeight='bold',
-                labelFontSize=13, titleFontSize=14, symbolSize=300, symbolStrokeWidth=2))
+                title='Diretoria',
+                labelFontWeight='bold', titleFontWeight='bold',
+                labelFontSize=13, titleFontSize=14,
+                symbolSize=300, symbolStrokeWidth=2
+            ))
         )
+
         labels = alt.Chart(chart_df).mark_text(
             align='left', dx=8, dy=-8, fontWeight='bold', fontSize=13
-        ).encode(x='Período', y='Valor:Q', text=alt.Text('Label'), color='Diretoria:N')
+        ).encode(
+            x='Período:N', y='Valor:Q', text='Label:N', color='Diretoria:N'
+        )
+
         st.markdown(f"**{name} – %RL**")
         st.altair_chart(base + labels, use_container_width=True)
 
-# ==================== Telas ====================
+# ==================== Abas (conteúdo vem DEPOIS dos filtros) ====================
+tab1, tab2, tab3, tab4 = st.tabs(["Visão Geral", "Visão Diretoria", "Gráficos", "Versionamento"])
+
 with tab1:  # Visão Geral
-    # Filtro de KPI respeitando ORDEM da base
     kpi_opts_all = kpi_filter_options_from_base(df_all_dirs)
     kpi_opts = ["(todos)"] + kpi_opts_all
     kpi_filter = st.selectbox("Filtrar KPI (linha):", options=kpi_opts, index=0, key="kpi_vg")
 
-    # aplica filtro (somente linha específica) se selecionado
     if kpi_filter != "(todos)":
         m_show = m[(m["KPI_COMPACT"]==kpi_filter) | (m["KPI"]==kpi_filter)].copy()
         if m_show.empty:
@@ -845,10 +914,8 @@ with tab1:  # Visão Geral
 
     # Highlights
     st.markdown("### 🔎 Highlights do mês")
-
     def _is_consolidado_selected_only():
         return (len(diretoria_sel_keys)==1 and diretoria_sel_keys[0]=="" and len(setor_sel)==0)
-
     _show_sector_breakdown = _is_consolidado_selected_only()
 
     def _excluded_kpi(name: str) -> bool:
