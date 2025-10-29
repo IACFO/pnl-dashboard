@@ -326,7 +326,7 @@ def load_normalize(file_bytes: bytes, filename: str) -> pd.DataFrame:
 # === Fonte de dados (sidebar): repo por padrão ===
 st.sidebar.markdown("### Fonte de dados")
 DEFAULT_DATA_PATH = os.path.join(os.path.dirname(__file__), "BASE_PNL.xlsx")
-use_repo_file = st.sidebar.checkbox("Usar BASE_PNL.xlsx do repositório", value=True, key="use_repo")
+use_repo_file = st.sidebar.checkbox("BASE_PNL.xlsx do repositório", value=True, key="use_repo")
 uploaded = None
 if not use_repo_file:
     uploaded = st.sidebar.file_uploader("Carregue uma base (XLSX/CSV)", type=["xlsx","xls","csv"], key="upl1")
@@ -1021,7 +1021,6 @@ with tab3:
         draw_margin_block(mD, df_all_dirs, diretoria_sel_keys)
 
 with tab4:  # Roadmap
-    st.markdown("## 🗺️ Roadmap")
 
     c1, c2 = st.columns([1, 1])
     with c1:
