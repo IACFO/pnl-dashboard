@@ -16,33 +16,49 @@ from openpyxl.styles import Font, PatternFill, Alignment
 
 # --- Auth simples por senha única ---
 def require_password():
-    if "auth_ok" not in st.session_state:
-        st.session_state["auth_ok"] = False
-
-    if st.session_state["auth_ok"]:
+    # já autenticado -> mostra botão sair e segue
+    if st.session_state.get("auth_ok", False):
         with st.sidebar:
             if st.button("Sair"):
                 st.session_state["auth_ok"] = False
-                st.experimental_rerun()
-        return  # já autenticado
+                # limpa qualquer resíduo do input
+                st.session_state.pop("__pwd", None)
+                # rerun compatível
+                if hasattr(st, "rerun"):
+                    st.rerun()
+                else:
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
+        return
 
     st.markdown("### 🔒 Acesso restrito")
-    pwd = st.text_input("Digite a senha para acessar:", type="password")
-    if st.button("Entrar"):
-        valid = False
-        # busca a senha dos secrets (ou variável de ambiente como fallback)
-        secret_pwd = st.secrets.get("APP_PASSWORD", None)
-        if secret_pwd and pwd == secret_pwd:
-            valid = True
-        if valid:
+    pwd = st.text_input("Digite a senha para acessar:", type="password", key="__pwd")
+    submitted = st.button("Entrar", use_container_width=True)
+
+    if submitted:
+        secret_pwd = st.secrets.get("APP_PASSWORD", "")
+        if pwd and secret_pwd and pwd == secret_pwd:
             st.session_state["auth_ok"] = True
-            st.experimental_rerun()
+            # remove o valor da senha da memória
+            st.session_state.pop("__pwd", None)
+            # rerun compatível (para limpar a tela de login sem erro)
+            if hasattr(st, "rerun"):
+                st.rerun()
+            else:
+                try:
+                    st.experimental_rerun()
+                except Exception:
+                    # se der erro no Cloud, apenas segue sem rerun
+                    pass
+            return
         else:
             st.error("Senha inválida.")
+            st.stop()
 
-    st.stop()  # bloqueia o resto do app enquanto não logar
-
-require_password()
+    # bloqueia o resto do app até logar
+    st.stop()
 
 # ==================== VISUAL / CSS ====================
 CB = {
