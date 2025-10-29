@@ -632,10 +632,8 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnl
 
 def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> str:
     """
-    Visão Diretoria com coluna KPI congelada (desktop e mobile).
-    No mobile:
-      - KPI ocupa ~78% da largura da tela
-      - Permite quebra de linha (melhor leitura)
+    Visão Diretoria com coluna KPI congelada (desktop e mobile),
+    garantindo que o texto apareça em qualquer resolução.
     """
 
     def order_diretorias_local(opts):
@@ -662,12 +660,8 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
 
     base_rows = dedup_kpi(m_df)
     base_rows["_PAI"] = (base_rows["AGREG"].str.lower()=="pai").astype(int)
-    base_rows["DRE_TXT"] = np.where(
-        base_rows["_PAI"]==1, base_rows["KPI_COMPACT"].astype(str), base_rows["KPI"].astype(str)
-    )
-    base_rows["DRE_HTML"] = np.where(
-        base_rows["_PAI"]==1, "<b>"+base_rows["DRE_TXT"]+"</b>", base_rows["DRE_TXT"]
-    )
+    base_rows["DRE_TXT"]  = np.where(base_rows["_PAI"]==1, base_rows["KPI_COMPACT"].astype(str), base_rows["KPI"].astype(str))
+    base_rows["DRE_HTML"] = np.where(base_rows["_PAI"]==1, "<b>"+base_rows["DRE_TXT"]+"</b>", base_rows["DRE_TXT"])
 
     headers = ["<th class='sticky-col sticky-head'>KPI</th>"] \
             + [f"<th colspan='2'>{disp_label(k)}</th>" for k in dir_order]
@@ -676,8 +670,9 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
 
     rows_html = []
     for _, r in base_rows.iterrows():
-        first_td = f"<td class='sticky-col sticky-cell' title='{r['DRE_TXT']}'>{r['DRE_HTML']}</td>"
-        row_cells = [first_td]
+        # envolve em div para melhor controle no mobile
+        first_td_html = f"<div class='kpi-cell' title='{r['DRE_TXT']}'>{r['DRE_HTML']}</div>"
+        row_cells = [f"<td class='sticky-col sticky-cell'>{first_td_html}</td>"]
         for k in dir_order:
             sub = m_df[
                 (m_df["AGREG"]==r["AGREG"]) &
@@ -699,58 +694,82 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
     html = f"""
     <style>
       :root {{
-        --kpi-col-min-desktop: 320px; /* desktop */
+        /* Ajuste aqui se precisar mais espaço no desktop */
+        --kpi-col-width-desktop: 340px;
       }}
+
       .table-wrap {{
         max-height: 70vh;
         overflow: auto;
         border: 1px solid #e9edf4;
         border-radius: 10px;
-        white-space: nowrap; /* desktop: sem quebra */
         -webkit-overflow-scrolling: touch;
       }}
-      table.pnltbl {{ border-collapse: collapse; width: 100%; }}
+      table.pnltbl {{
+        border-collapse: collapse;
+        width: 100%;
+      }}
 
-      /* sticky headers (duas linhas) */
+      /* Cabeçalhos sticky (duas linhas) */
       #{table_id} thead tr:nth-child(1) th {{
-        position: sticky; top: 0; z-index: 5;
+        position: sticky; top: 0; z-index: 10;
         background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
         border-bottom: 1px solid #d0d7de;
       }}
       #{table_id} thead tr:nth-child(2) th {{
-        position: sticky; top: 38px; z-index: 5;
+        position: sticky; top: 38px; z-index: 10;
         background: {CB["blue"]}; color: #fff; font-weight: 700; padding: 8px;
         border-bottom: 1px solid #d0d7de;
       }}
 
-      /* 1ª coluna sticky (header + body) */
-      #{table_id} .sticky-col {{ position: sticky; left: 0; }}
+      /* 1ª coluna sticky (header + body) — garante largura e visibilidade */
+      #{table_id} .sticky-col {{
+        position: sticky;
+        left: 0;
+        z-index: 9;
+        background-clip: padding-box;
+      }}
       #{table_id} th.sticky-col.sticky-head {{
-        z-index: 7; min-width: var(--kpi-col-min-desktop);
-        background: {CB["blue"]}; color: #fff; white-space: nowrap;
+        min-width: var(--kpi-col-width-desktop);
+        max-width: var(--kpi-col-width-desktop);
+        background: {CB["blue"]};
+        color: #fff;
+        white-space: nowrap;
       }}
       #{table_id} td.sticky-col.sticky-cell {{
-        z-index: 6; min-width: var(--kpi-col-min-desktop);
-        background: #fff; border-right: 1px solid #e9edf4;
+        min-width: var(--kpi-col-width-desktop);
+        max-width: var(--kpi-col-width-desktop);
+        background: #fff;
+        border-right: 1px solid #e9edf4;
         box-shadow: 2px 0 4px rgba(0,0,0,0.04);
-        white-space: nowrap; /* desktop */
+        color: {CB["ink"]};
+      }}
+
+      /* Conteúdo textual da KPI — controla quebra/ellipsis conforme viewport */
+      #{table_id} .kpi-cell {{
+        display: block;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;   /* desktop: não quebra */
+        color: {CB["ink"]};
       }}
 
       table.pnltbl td {{ padding: 6px 8px; border-bottom: 1px solid #eee; }}
       table.pnltbl tr.parent {{ background: #f7f7f7; font-weight: 700; }}
 
-      /* ===== Mobile tweaks ===== */
+      /* ===== Mobile (<= 640px): a KPI pode quebrar linha para aparecer inteira) ===== */
       @media (max-width: 640px) {{
-        .table-wrap {{ white-space: normal; }} /* permite quebra no mobile */
         #{table_id} th.sticky-col.sticky-head,
         #{table_id} td.sticky-col.sticky-cell {{
-          min-width: 78vw;           /* KPI ocupa a maior parte da tela */
-          max-width: 85vw;
+          min-width: 85vw;         /* ocupa a maior parte da tela */
+          max-width: 90vw;
         }}
-        #{table_id} td.sticky-col.sticky-cell {{
-          white-space: normal;       /* pode quebrar linha */
+        #{table_id} .kpi-cell {{
+          white-space: normal;     /* permite quebrar */
+          word-break: break-word;  /* quebra em qualquer ponto se necessário */
+          overflow: visible;
+          text-overflow: clip;
           line-height: 1.2;
-          padding-right: 12px;
         }}
       }}
     </style>
