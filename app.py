@@ -17,13 +17,16 @@ from openpyxl.styles import Font, PatternFill, Alignment
 # --- Auth simples por senha única ---
 def require_password():
     # logout por querystring (ex.: ?logout=1)
-    qs = st.experimental_get_query_params()
+    qs = st.query_params
     if qs.get("logout", ["0"])[0] == "1":
         st.session_state.clear()
-        if hasattr(st, "rerun"): st.rerun()
+        if hasattr(st, "rerun"):
+            st.rerun()
         else:
-            try: st.experimental_rerun()
-            except Exception: pass
+            try:
+                st.experimental_rerun()
+            except Exception:
+                pass
 
     # força a existência da senha nos secrets
     secret_pwd = st.secrets.get("APP_PASSWORD", "").strip()
@@ -31,7 +34,7 @@ def require_password():
         st.error("Senha de acesso não configurada (APP_PASSWORD).")
         st.stop()
 
-    # estado local da sessão (não global do app)
+    # estado da sessão
     authed = st.session_state.get("auth_ok", False)
 
     if not authed:
@@ -40,13 +43,15 @@ def require_password():
         submit = st.button("Entrar", use_container_width=True)
         if submit:
             if pwd == secret_pwd:
-                # marca sessão atual como autenticada
                 st.session_state["auth_ok"] = True
                 st.session_state.pop("__pwd", None)
-                if hasattr(st, "rerun"): st.rerun()
+                if hasattr(st, "rerun"):
+                    st.rerun()
                 else:
-                    try: st.experimental_rerun()
-                    except Exception: pass
+                    try:
+                        st.experimental_rerun()
+                    except Exception:
+                        pass
                 return
             else:
                 st.error("Senha inválida.")
@@ -57,14 +62,16 @@ def require_password():
     with st.sidebar:
         if st.button("Sair"):
             st.session_state.clear()
-            # adiciona logout=1 para garantir limpeza em qualquer client
-            st.experimental_set_query_params(logout="1")
-            if hasattr(st, "rerun"): st.rerun()
+            st.query_params = {"logout": "1"}  # redefine querystring
+            if hasattr(st, "rerun"):
+                st.rerun()
             else:
-                try: st.experimental_rerun()
-                except Exception: pass
+                try:
+                    st.experimental_rerun()
+                except Exception:
+                    pass
 
-# >>> CHAME AQUI, logo após os imports:
+# >>> CHAME LOGO APÓS OS IMPORTS:
 require_password()
 
 # ==================== VISUAL / CSS ====================
