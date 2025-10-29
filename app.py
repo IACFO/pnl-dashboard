@@ -632,13 +632,12 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame, table_id="pnl
 
 def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> str:
     """
-    Visão Diretoria:
-      - Coluna KPI congelada à esquerda (header e corpo)
-      - Cabeçalhos congelados (duas linhas)
-      - Mantém scroll horizontal
+    Visão Diretoria com coluna KPI congelada (desktop e mobile).
+    No mobile:
+      - KPI ocupa ~78% da largura da tela
+      - Permite quebra de linha (melhor leitura)
     """
 
-    # ---- ordenação das diretorias (fixa + restantes) ----
     def order_diretorias_local(opts):
         pri = ["", "LINHA BRANCA", "MOVEIS", "TELAS", "TELEFONIA", "LINHA LEVE E SAZONAL", "INFO", "CAUDA"]
         out, seen = [], set()
@@ -659,28 +658,26 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
         .set_index("DIRETORIA_KEY")["DIRETORIA"]
         .to_dict()
     )
-    def disp_label(k):
-        return "Consolidado" if k=="" else (key_to_label.get(k) or k).title()
+    def disp_label(k): return "Consolidado" if k=="" else (key_to_label.get(k) or k).title()
 
-    # ---- linhas base (dedup por KPI; pais/filhos por ORDEM) ----
     base_rows = dedup_kpi(m_df)
     base_rows["_PAI"] = (base_rows["AGREG"].str.lower()=="pai").astype(int)
+    base_rows["DRE_TXT"] = np.where(
+        base_rows["_PAI"]==1, base_rows["KPI_COMPACT"].astype(str), base_rows["KPI"].astype(str)
+    )
     base_rows["DRE_HTML"] = np.where(
-        base_rows["_PAI"]==1,
-        "<b>"+base_rows["KPI_COMPACT"].astype(str)+"</b>",
-        base_rows["KPI"].astype(str)
+        base_rows["_PAI"]==1, "<b>"+base_rows["DRE_TXT"]+"</b>", base_rows["DRE_TXT"]
     )
 
-    # ---- cabeçalhos (1ª coluna sticky) ----
     headers = ["<th class='sticky-col sticky-head'>KPI</th>"] \
             + [f"<th colspan='2'>{disp_label(k)}</th>" for k in dir_order]
     subhdr  = ["<th class='sticky-col sticky-head'></th>"] \
             + sum([[f"<th>Projeção</th>", f"<th>Δ vs M-1</th>"] for _ in dir_order], [])
 
-    # ---- corpo ----
     rows_html = []
     for _, r in base_rows.iterrows():
-        row_cells = [f"<td class='sticky-col sticky-cell'>{r['DRE_HTML']}</td>"]
+        first_td = f"<td class='sticky-col sticky-cell' title='{r['DRE_TXT']}'>{r['DRE_HTML']}</td>"
+        row_cells = [first_td]
         for k in dir_order:
             sub = m_df[
                 (m_df["AGREG"]==r["AGREG"]) &
@@ -692,34 +689,27 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
                 row_cells += ["<td></td>", "<td></td>"]
             else:
                 t = str(sub["TIPO"].iloc[0]).upper()
-                v_proj = sub["proj"].iloc[0]
-                v_dm1  = sub["d_m1"].iloc[0]
+                v_proj = sub["proj"].iloc[0]; v_dm1 = sub["d_m1"].iloc[0]
                 proj_txt = fmt_pp_value(sub["p_proj"].iloc[0]) if t=="PP" else fmt_brl(v_proj)
                 dm1_txt  = decorate_delta_pp_plain(v_dm1) if t=="PP" else decorate_delta_money(v_dm1)
                 row_cells += [f"<td>{proj_txt}</td>", f"<td>{dm1_txt}</td>"]
         tr_class = "parent" if int(r["_PAI"])==1 else ""
         rows_html.append(f"<tr class='{tr_class}'>{''.join(row_cells)}</tr>")
 
-    # ---- CSS: sticky col + sticky headers (2 linhas) ----
     html = f"""
     <style>
-      /* parâmetros fáceis de ajustar */
       :root {{
-        --kpi-col-min: 320px;  /* aumente se o texto do KPI for muito longo */
+        --kpi-col-min-desktop: 320px; /* desktop */
       }}
-
       .table-wrap {{
         max-height: 70vh;
         overflow: auto;
         border: 1px solid #e9edf4;
         border-radius: 10px;
-        white-space: nowrap;  /* evita quebra */
+        white-space: nowrap; /* desktop: sem quebra */
+        -webkit-overflow-scrolling: touch;
       }}
-      table.pnltbl {{
-        border-collapse: collapse;
-        width: 100%;
-        /* não fixamos table-layout para a 1ª coluna poder respeitar min-width */
-      }}
+      table.pnltbl {{ border-collapse: collapse; width: 100%; }}
 
       /* sticky headers (duas linhas) */
       #{table_id} thead tr:nth-child(1) th {{
@@ -734,28 +724,35 @@ def render_table_diretoria(m_df: pd.DataFrame, table_id: str = "pnltbl_dir") -> 
       }}
 
       /* 1ª coluna sticky (header + body) */
-      #{table_id} .sticky-col {{
-        position: sticky;
-        left: 0;
-        white-space: nowrap;
-      }}
+      #{table_id} .sticky-col {{ position: sticky; left: 0; }}
       #{table_id} th.sticky-col.sticky-head {{
-        z-index: 7;               /* acima do resto do header */
-        min-width: var(--kpi-col-min);
-        background: {CB["blue"]}; /* mesma cor do cabeçalho */
-        color: #fff;
+        z-index: 7; min-width: var(--kpi-col-min-desktop);
+        background: {CB["blue"]}; color: #fff; white-space: nowrap;
       }}
       #{table_id} td.sticky-col.sticky-cell {{
-        z-index: 6;               /* acima das demais células */
-        min-width: var(--kpi-col-min);
-        background: #fff;         /* precisa de fundo sólido para sobrepor */
-        border-right: 1px solid #e9edf4;
+        z-index: 6; min-width: var(--kpi-col-min-desktop);
+        background: #fff; border-right: 1px solid #e9edf4;
         box-shadow: 2px 0 4px rgba(0,0,0,0.04);
+        white-space: nowrap; /* desktop */
       }}
 
-      /* linhas/células comuns */
       table.pnltbl td {{ padding: 6px 8px; border-bottom: 1px solid #eee; }}
       table.pnltbl tr.parent {{ background: #f7f7f7; font-weight: 700; }}
+
+      /* ===== Mobile tweaks ===== */
+      @media (max-width: 640px) {{
+        .table-wrap {{ white-space: normal; }} /* permite quebra no mobile */
+        #{table_id} th.sticky-col.sticky-head,
+        #{table_id} td.sticky-col.sticky-cell {{
+          min-width: 78vw;           /* KPI ocupa a maior parte da tela */
+          max-width: 85vw;
+        }}
+        #{table_id} td.sticky-col.sticky-cell {{
+          white-space: normal;       /* pode quebrar linha */
+          line-height: 1.2;
+          padding-right: 12px;
+        }}
+      }}
     </style>
 
     <div class='table-wrap'>
