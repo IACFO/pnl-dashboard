@@ -16,8 +16,8 @@ import altair as alt
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 
-# ===== LOGIN POR SENHA ÚNICA (expira em 7 dias) =====
-AUTH_EXPIRY_DAYS = 7
+# ===== LOGIN POR SENHA ÚNICA (robusto e sem warnings) =====
+import streamlit as st
 
 def require_password():
     # logout por querystring (ex.: ?logout=1)
@@ -32,34 +32,22 @@ def require_password():
             except Exception:
                 pass
 
-    # senha vinda dos secrets
+    # força a existência da senha nos secrets
     secret_pwd = st.secrets.get("APP_PASSWORD", "").strip()
     if not secret_pwd:
         st.error("Senha de acesso não configurada (APP_PASSWORD).")
         st.stop()
 
-    # checa expiração
+    # estado da sessão
     authed = st.session_state.get("auth_ok", False)
-    auth_time_iso = st.session_state.get("auth_time_iso")
-    expired = True
-    if authed and auth_time_iso:
-        try:
-            t0 = datetime.fromisoformat(auth_time_iso)
-            expired = (datetime.now(timezone.utc) - t0) > timedelta(days=AUTH_EXPIRY_DAYS)
-        except Exception:
-            expired = True
 
-    if not authed or expired:
-        if expired:
-            st.session_state.clear()
-
+    if not authed:
         st.markdown("### 🔒 Acesso restrito")
         pwd = st.text_input("Digite a senha para acessar:", type="password", key="__pwd")
         submit = st.button("Entrar", use_container_width=True)
         if submit:
             if pwd == secret_pwd:
                 st.session_state["auth_ok"] = True
-                st.session_state["auth_time_iso"] = datetime.now(timezone.utc).isoformat()
                 st.session_state.pop("__pwd", None)
                 if hasattr(st, "rerun"):
                     st.rerun()
@@ -74,11 +62,11 @@ def require_password():
                 st.stop()
         st.stop()
 
-    # já autenticado e válido -> botão sair
+    # já autenticado -> mostra botão sair
     with st.sidebar:
         if st.button("Sair"):
             st.session_state.clear()
-            st.query_params = {"logout": "1"}
+            st.query_params = {"logout": "1"}  # redefine querystring
             if hasattr(st, "rerun"):
                 st.rerun()
             else:
@@ -87,7 +75,7 @@ def require_password():
                 except Exception:
                     pass
 
-# >>> CHAME O GATE ANTES DE QUALQUER OUTRA UI
+# >>> CHAME LOGO APÓS OS IMPORTS:
 require_password()
 
 # ==================== VISUAL / CSS ====================
