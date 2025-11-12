@@ -292,6 +292,57 @@ def inject_css():
         border-right: 1px solid #dfe3ea;
     }}
 
+    /* ========= CANAL B2C ==========
+   1 linha de header + 2 colunas fixas
+---------------------------------*/
+
+/* largura da 1ª coluna */
+#pnltbl_canal th:first-child,
+#pnltbl_canal td:first-child {{
+    min-width: 180px; /* ajuste fino se precisar */
+}}
+
+/* linha de header (toda a linha) fixa no topo */
+#pnltbl_canal thead th {{
+    position: sticky;
+    top: 0;                    /* fixa no topo do container .table-wrap */
+    z-index: 15;               /* acima das colunas fixas */
+    background: #002d7a;       /* azul do header */
+    color: #fff;
+    height: 34px;
+    line-height: 34px;
+}}
+
+/* 1ª coluna fixa (PARCEIRO) */
+#pnltbl_canal th:first-child,
+#pnltbl_canal td:first-child {{
+    position: sticky;
+    left: 0;
+    z-index: 14;
+    background: #f9f9f9;
+    border-right: 1px solid #dfe3ea;
+}}
+
+/* 2ª coluna fixa (CANAL) */
+#pnltbl_canal th:nth-child(2),
+#pnltbl_canal td:nth-child(2) {{
+    position: sticky;
+    left: 180px;               /* igual ao min-width acima */
+    z-index: 14;
+    background: #f9f9f9;
+    border-right: 1px solid #dfe3ea;
+}}
+
+/* garante que header das colunas fixas também fique azul */
+#pnltbl_canal thead th:first-child,
+#pnltbl_canal thead th:nth-child(2) {{
+    background: #002d7a;
+    color: #fff;
+    z-index: 16;
+}}
+
+
+
     /* Responsivo */
     @media (max-width: 640px) {{
       .stMultiSelect, .stSelectbox, .stCheckbox, .stRadio {{
@@ -300,7 +351,6 @@ def inject_css():
     }}
     </style>
     """, unsafe_allow_html=True)
-
 
 
 
@@ -1189,8 +1239,82 @@ def load_base_parceiro(file_bytes: bytes, filename: str):
     df = df_raw[["PARCEIRO", "CÉLULA", "MES"] + kpi_cols].copy()
     return df, meta
 
+@st.cache_data(show_spinner=False)
+def load_base_canal(file_bytes: bytes, filename: str):
+    """
+    Carrega e normaliza a aba 'BASE CANAL' do Excel.
+    Ignora colunas de 3 a 10 e 99 (colunas técnicas).
+    """
+    try:
+        df_raw = pd.read_excel(io.BytesIO(file_bytes), sheet_name="BASE CANAL", header=[0, 1])
+    except Exception:
+        return None, None
+
+    def clean_col(x):
+        s = str(x or "").replace("\n", " ").replace("\r", " ")
+        s = re.sub(r"\s+", " ", s).strip()
+        return remove_accents(s).upper()
+
+    # Normaliza nomes
+    new_cols = []
+    for lvl0, lvl1 in df_raw.columns:
+        c0, c1 = clean_col(lvl0), clean_col(lvl1)
+        col = f"{c0} {c1}".strip() or c0 or c1
+        new_cols.append(col)
+    df_raw.columns = new_cols
+
+    # Mapeia chaves
+    col_map = {}
+    for c in df_raw.columns:
+        if "PARCEIRO" in c:
+            col_map[c] = "PARCEIRO"
+        elif "CANAL" in c:
+            col_map[c] = "CANAL"
+        elif "MES" in c or "MÊS" in c:
+            col_map[c] = "MES"
+    df_raw.rename(columns=col_map, inplace=True)
+
+    for base_col in ["PARCEIRO", "CANAL", "MES"]:
+        if base_col not in df_raw.columns:
+            df_raw[base_col] = ""
+
+    # remove duplicadas
+    df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()]
+
+    # remove colunas 3–10 e 99 pelo índice (zero-based: 2..9 e 98)
+    cols_to_remove = list(range(2, 10)) + [98]
+    cols_to_keep = [c for i, c in enumerate(df_raw.columns) if i not in cols_to_remove]
+    df_raw = df_raw[cols_to_keep]
+
+    kpi_cols = [c for c in df_raw.columns if c not in ["PARCEIRO", "CANAL", "MES"]]
+
+    # metadados
+    kpi_meta = []
+    for i, k in enumerate(kpi_cols):
+        is_pct = ("%" in k) or ("PCT" in k) or ("COMISSAO PARCEIRO" in k) or ("COMISSAO" in k and "TOTAL" not in k)
+        kpi_meta.append({"kpi": k, "is_pct": is_pct, "order": i})
+    meta = pd.DataFrame(kpi_meta)
+
+    # normalização suave de mês (mantém MM/AAAA se já vier assim)
+    def normalize_mes(x):
+        s = str(x).strip()
+        if re.match(r"^\d{4}-\d{1,2}$", s):
+            y, m = s.split("-")
+            return f"{int(m):02d}/{y}"
+        elif re.match(r"^\d{1,2}/\d{4}$", s):
+            return s
+        return s
+
+    df_raw["MES"] = df_raw["MES"].apply(normalize_mes)
+
+    df = df_raw[["PARCEIRO", "CANAL", "MES"] + kpi_cols].copy()
+    return df, meta
+
+
 
 b2b_df, b2b_meta = load_base_parceiro(file_bytes, filename)
+canal_df, canal_meta = load_base_canal(file_bytes, filename)
+
 
 def fmt_b2b_value(v, is_pct: bool):
     if pd.isna(v):
@@ -1202,6 +1326,9 @@ def fmt_b2b_value(v, is_pct: bool):
         return fmt_pct_symbol(v)
     else:
         return fmt_brl(v)
+
+
+
 
 # ==================== GRÁFICOS AUX ====================
 
@@ -1386,9 +1513,14 @@ def to_xlsx_bytes(m: pd.DataFrame, show_money: bool, show_percent: bool) -> byte
 
 # ==================== ABAS ====================
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["Visão Geral", "Visão Diretoria", "Gráficos", "Roadmap", "Parceiro B2B"]
-)
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "Visão Geral",
+    "Visão Diretoria",
+    "Gráficos",
+    "Roadmap",
+    "Parceiro B2B",
+    "Canal B2C"
+])
 
 # ---------- VISÃO GERAL ----------
 
@@ -1690,25 +1822,20 @@ with tab4:
     with c1:
         st.markdown("### 📌 Próximas entregas")
         st.markdown("""
-- **Filtro B2B**
 - **Visão canal B2C**
-- **Visão parceiro B2B**
 - **Simulador**
 - **Visão de KPIs por Analista**
         """)
     with c2:
         st.markdown("### 🔧 Entregas em revisão")
         st.markdown("""
-- **Novo cálculo para linhas de Marketing**
-- **Valores de INFO na aba Visão Diretoria**
-- **Ajustes Visão Parceiro B2B**
+- ****
         """)
 
 # ---------- PARCEIRO B2B (OTIMIZADO E CACHEADO) ----------
 
 with tab5:
     st.markdown("## 🤝 Visão Parceiro (B2B)")
-    st.caption("Visualização otimizada — cache inteligente e renderização instantânea.")
 
     # --- Carrega base específica do parceiro ---
     if b2b_df is None or b2b_meta is None or b2b_df.empty:
@@ -1865,5 +1992,168 @@ with tab5:
     st.markdown(f"**Período selecionado:** {mes_sel_label}")
     st.markdown(html_table, unsafe_allow_html=True)
     st.caption(f"⏱ Tempo de renderização: {(end_time - start_time).total_seconds():.2f} s")
+
+
+# ==================== VISÃO CANAL (B2C) ====================
+
+with tab6:
+    st.markdown("## 🛒 Visão Canal (B2C)")
+
+    # --- Carrega base específica do canal ---
+    if canal_df is None or canal_meta is None or canal_df.empty:
+        st.info("Sem dados na aba 'BASE CANAL'.")
+        st.stop()
+
+    # --- Cache leve (para labels de mês) ---
+    @st.cache_data(show_spinner=False)
+    def get_mes_labels(df):
+        raw_meses = sorted([m for m in df["MES"].unique() if str(m).strip()])
+        def label_mes(m):
+            s = str(m).strip()
+            if "-" in s:
+                try:
+                    y, mo = s.split("-")[:2]
+                    return f"{int(mo):02d}/{int(y)}"
+                except Exception:
+                    pass
+            if "/" in s:
+                return s
+            return s
+        mes_labels = {m: label_mes(m) for m in raw_meses}
+        inv_labels = {v: k for k, v in mes_labels.items()}
+        return raw_meses, mes_labels, inv_labels
+
+    raw_meses, mes_labels, inv_labels = get_mes_labels(canal_df)
+
+    if not raw_meses:
+        st.info("Sem meses disponíveis para Canal B2C.")
+        st.stop()
+
+    default_label = mes_labels[raw_meses[-1]]
+    mes_sel_label = st.selectbox(
+        "Mês:",
+        options=list(inv_labels.keys()),
+        index=list(inv_labels.keys()).index(default_label),
+        key="canal_mes"
+    )
+    mes_sel = inv_labels[mes_sel_label]
+    df_mes = canal_df[canal_df["MES"] == mes_sel].copy()
+
+    # --- Filtros locais (Parceiro / Canal) ---
+    c1, c2 = st.columns(2)
+    with c1:
+        parceiros = sorted(df_mes["PARCEIRO"].dropna().unique().tolist())
+        parc_sel = st.multiselect(
+            "Parceiro(s):",
+            options=["(todos)"] + parceiros,
+            default=["(todos)"],
+            key="canal_parc"
+        )
+    with c2:
+        canais = sorted(df_mes["CANAL"].dropna().unique().tolist())
+        canal_sel = st.multiselect(
+            "Canal(is):",
+            options=["(todos)"] + canais,
+            default=["(todos)"],
+            key="canal_canal"
+        )
+
+    if "(todos)" not in parc_sel:
+        df_mes = df_mes[df_mes["PARCEIRO"].isin(parc_sel)]
+    if "(todos)" not in canal_sel:
+        df_mes = df_mes[df_mes["CANAL"].isin(canal_sel)]
+
+    # --- Filtros opcionais (iguais ao B2B) ---
+    meta_sorted = canal_meta.sort_values("order")
+    kpi_all = meta_sorted["kpi"].tolist()
+
+    c3, c4 = st.columns(2)
+    with c3:
+        canal_only_totais = st.checkbox("Mostrar apenas totais", value=False, key="canal_totais")
+    with c4:
+        canal_only_margem = st.checkbox("Apenas margens", value=False, key="canal_margem")
+
+    kpi_sel = st.selectbox(
+        "Filtrar KPI (coluna):",
+        options=["(todos)"] + kpi_all,
+        index=0,
+        key="canal_kpi"
+    )
+
+    # --- Cache do subset da base filtrada ---
+    @st.cache_data(show_spinner=False)
+    def filter_canal_base(df_mes, kpi_all, canal_only_totais, canal_only_margem, kpi_sel):
+        kpis_use = kpi_all.copy()
+
+        if canal_only_totais:
+            kpis_use = [
+                k for k in kpis_use
+                if ("TOTAL" in _norm_key(k))
+                or ("MARGEM CONTRIBUICAO" in _norm_key(k))
+                or (_norm_key(k) in {"MBL", "LAIR"})
+            ]
+
+        if canal_only_margem:
+            def is_margin_k(k):
+                nk = _norm_key(k)
+                return any(kw in nk for kw in [
+                    "MARGEM CONTRIBUICAO #1",
+                    "MARGEM CONTRIBUICAO #2",
+                    "MARGEM CONTRIBUICAO #3",
+                    "MARGEM CONTRIBUICAO #4",
+                    "MARGEM FRONT",
+                    "COMISSAO PARCEIRO"
+                ])
+            kpis_use = [k for k in kpis_use if is_margin_k(k)]
+
+        if kpi_sel != "(todos)":
+            kpis_use = [k for k in kpis_use if k == kpi_sel]
+
+        show_cols = ["PARCEIRO", "CANAL"] + kpis_use
+        df_view = df_mes[show_cols].copy()
+        return df_view, kpis_use
+
+    df_view, kpis_use = filter_canal_base(df_mes, kpi_all, canal_only_totais, canal_only_margem, kpi_sel)
+
+    if not kpis_use:
+        st.info("Nenhum KPI selecionado para exibição.")
+        st.stop()
+
+    # --- Renderização HTML cacheada (layout igual ao B2B) ---
+    @st.cache_data(show_spinner=False)
+    def render_canal_html(df_view, kpis_use, canal_meta):
+        meta_lookup = {row["kpi"]: bool(row["is_pct"]) for _, row in canal_meta.iterrows()}
+
+        headers = "".join(f"<th>{c}</th>" for c in df_view.columns)
+        rows_html = []
+        for _, row in df_view.iterrows():
+            tds = []
+            for c in df_view.columns:
+                if c in ("PARCEIRO", "CANAL"):
+                    tds.append(f"<td>{row[c]}</td>")
+                else:
+                    is_pct = meta_lookup.get(c, False)
+                    val = fmt_b2b_value(row[c], is_pct)
+                    tds.append(f"<td>{val}</td>")
+            rows_html.append(f"<tr>{''.join(tds)}</tr>")
+
+        html = f"""
+        <div class='table-wrap'>
+          <table id="pnltbl_canal" class='pnltbl'>
+            <thead><tr>{headers}</tr></thead>
+            <tbody>{''.join(rows_html)}</tbody>
+          </table>
+        </div>
+        """
+        return html
+
+    start_time = datetime.now()
+    html_table = render_canal_html(df_view, kpis_use, canal_meta)
+    end_time = datetime.now()
+
+    st.markdown(f"**Período selecionado:** {mes_sel_label}")
+    st.markdown(html_table, unsafe_allow_html=True)
+    st.caption(f"⏱ Tempo de renderização: {(end_time - start_time).total_seconds():.2f} s")
+
 
 
