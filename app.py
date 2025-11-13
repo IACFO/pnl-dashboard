@@ -2051,7 +2051,7 @@ with tab4:
     with c2:
         st.markdown("### 🔧 Entregas em revisão")
         st.markdown("""
-- ****
+- **Ajuste de meses visão Canal**
         """)
 
 # ---------- PARCEIRO B2B (OTIMIZADO E CACHEADO) ----------
@@ -2389,6 +2389,7 @@ with tab6:
 
     st.markdown(f"**Período vigente:** {mes_sel_label}")
     st.markdown(render_canal_html(df_view), unsafe_allow_html=True)
+
 
 
 
