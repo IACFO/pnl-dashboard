@@ -256,7 +256,6 @@ def inject_css():
         border-right: 1px solid #dfe3ea;
     }}
 
-
     /* ========= VISÃO PARCEIRO B2B ==
        1 linha de header + 2 primeiras colunas
     ----------------------------------*/
@@ -293,52 +292,87 @@ def inject_css():
     }}
 
     /* ========= CANAL B2C ==========
-   1 linha de header + 2 colunas fixas
----------------------------------*/
+       1 linha de header + 2 colunas fixas
+    ---------------------------------*/
 
-/* largura da 1ª coluna */
-#pnltbl_canal th:first-child,
-#pnltbl_canal td:first-child {{
-    min-width: 180px; /* ajuste fino se precisar */
+    /* largura da 1ª coluna */
+    #pnltbl_canal th:first-child,
+    #pnltbl_canal td:first-child {{
+        min-width: 180px;
+    }}
+
+    /* linha de header (toda a linha) fixa no topo */
+    #pnltbl_canal thead th {{
+        position: sticky;
+        top: 0;
+        z-index: 15;
+        background: #002d7a;
+        color: #fff;
+        height: 34px;
+        line-height: 34px;
+    }}
+
+    /* 1ª coluna fixa (PARCEIRO) */
+    #pnltbl_canal th:first-child,
+    #pnltbl_canal td:first-child {{
+        position: sticky;
+        left: 0;
+        z-index: 14;
+        background: #f9f9f9;
+        border-right: 1px solid #dfe3ea;
+    }}
+
+    /* 2ª coluna fixa (CANAL) */
+    #pnltbl_canal th:nth-child(2),
+    #pnltbl_canal td:nth-child(2) {{
+        position: sticky;
+        left: 180px;
+        z-index: 14;
+        background: #f9f9f9;
+        border-right: 1px solid #dfe3ea;
+    }}
+
+    /* garante que header das colunas fixas também fique azul */
+    #pnltbl_canal thead th:first-child,
+    #pnltbl_canal thead th:nth-child(2) {{
+        background: #002d7a;
+        color: #fff;
+        z-index: 16;
+    }}
+
+/* ========= HIGHLIGHTS – VISÃO GERAL ======== */
+
+/* cor padrão da linha PAI (todas as colunas) */
+#pnltbl_geral tr.parent td {{
+    background: #f1f6ff !important;
+    font-weight: 700;
+    color: #001b4d;
 }}
 
-/* linha de header (toda a linha) fixa no topo */
-#pnltbl_canal thead th {{
-    position: sticky;
-    top: 0;                    /* fixa no topo do container .table-wrap */
-    z-index: 15;               /* acima das colunas fixas */
-    background: #002d7a;       /* azul do header */
-    color: #fff;
-    height: 34px;
-    line-height: 34px;
+/* corrige o conflito da 1ª coluna fixa */
+#pnltbl_geral tr.parent td:first-child {{
+    background: #e7f0ff !important; /* um pouquinho mais escuro por cima do cinza */
 }}
 
-/* 1ª coluna fixa (PARCEIRO) */
-#pnltbl_canal th:first-child,
-#pnltbl_canal td:first-child {{
-    position: sticky;
-    left: 0;
-    z-index: 14;
-    background: #f9f9f9;
-    border-right: 1px solid #dfe3ea;
+/* hover */
+#pnltbl_geral tr:hover td {{
+    background: #eef3fa99 !important;
 }}
 
-/* 2ª coluna fixa (CANAL) */
-#pnltbl_canal th:nth-child(2),
-#pnltbl_canal td:nth-child(2) {{
-    position: sticky;
-    left: 180px;               /* igual ao min-width acima */
-    z-index: 14;
-    background: #f9f9f9;
-    border-right: 1px solid #dfe3ea;
+/* mantém hover diferente para coluna congelada */
+#pnltbl_geral tr:hover td:first-child {{
+    background: #e3e9f399 !important;
 }}
 
-/* garante que header das colunas fixas também fique azul */
-#pnltbl_canal thead th:first-child,
-#pnltbl_canal thead th:nth-child(2) {{
-    background: #002d7a;
-    color: #fff;
-    z-index: 16;
+/* ===========================
+   CORREÇÃO DEFINITIVA — VISÃO GERAL
+   Garante que a 1ª coluna da linha PAI também receba highlight
+   Sobrescreve o sticky cinza (#f9f9f9)
+=========================== */
+#pnltbl_geral tr.parent td:first-child {{
+    background: #f1f6ff !important;
+    font-weight: 700 !important;
+    color: #001b4d !important;
 }}
 
 
@@ -351,6 +385,7 @@ def inject_css():
     }}
     </style>
     """, unsafe_allow_html=True)
+
 
 
 
@@ -408,11 +443,32 @@ def _period_minus(p: str, m: int) -> str:
     return (pd.Period(p, freq="M") - m).strftime("%Y-%m")
 
 def fmt_brl(v):
-    if pd.isna(v):
+    """Formata valores numéricos em formato monetário brasileiro."""
+    import numpy as np
+    import pandas as pd
+
+    # Garante que estamos lidando com um valor escalar, não uma Series/DataFrame
+    if isinstance(v, (pd.Series, pd.DataFrame, np.ndarray, list)):
+        try:
+            v = v.values[0] if hasattr(v, "values") else v[0]
+        except Exception:
+            v = None
+
+    if v is None or pd.isna(v):
         return ""
-    v = float(v)
-    s = f"{abs(v):,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return f"R$ {'-' if v < 0 else ''}{s}"
+
+    try:
+        v = float(v)
+    except Exception:
+        return str(v)
+
+    if abs(v) >= 1_000_000:
+        return f"R$ {v/1_000_000:,.1f} mi".replace(",", "X").replace(".", ",").replace("X", ".")
+    elif abs(v) >= 1_000:
+        return f"R$ {v:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    else:
+        return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
 
 def fmt_pct_symbol(v, dec=2):
     if pd.isna(v):
@@ -908,10 +964,16 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame,
                          show_money: bool, show_percent: bool) -> str:
     m_consol = m_df.copy()
     tbl = dedup_kpi(m_consol)
-    tbl["_PAI"] = (tbl["AGREG"].str.lower() == "pai").astype(int)
-    tbl["DRE"] = np.where(tbl["_PAI"] == 1,
-                          "**" + tbl["KPI_COMPACT"] + "**",
-                          tbl["KPI"])
+
+    # Volta a lógica clássica: PAI = AGREG == "pai" (igual visão diretoria)
+    tbl["_PAI"] = tbl["AGREG"].astype(str).str.lower().eq("pai").astype(int)
+
+    # DRE: vamos montar o texto “cru”, sem ** aqui
+    tbl["DRE_RAW"] = np.where(
+        tbl["_PAI"] == 1,
+        tbl["KPI_COMPACT"],
+        tbl["KPI"]
+    )
 
     tipo_lookup = (
         df_raw[["AGREG", "KPI_COMPACT", "KPI", "TIPO"]]
@@ -921,12 +983,14 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame,
     )
     dfv = tbl.copy()
     dfv["AGREG"] = dfv["AGREG"].astype(str).str.lower()
-    dfv = dfv.merge(tipo_lookup,
-                    on=["AGREG", "KPI_COMPACT", "KPI"],
-                    how="left")
+    dfv = dfv.merge(
+        tipo_lookup,
+        on=["AGREG", "KPI_COMPACT", "KPI"],
+        how="left"
+    )
     dfv["TIPO"] = dfv["TIPO_SRC"].fillna("VALOR")
 
-    cols = ["DRE"]
+    cols = ["DRE_RAW"]
     if show_money:
         cols += ["real_m3", "real_m2", "real_m1", "proj", "d_m1", "d_m12", "d_fc"]
     if show_percent:
@@ -949,9 +1013,9 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame,
         "pd_fc": "Δ vs Forecast %RL",
     }
 
-    df_show = dfv[["_PAI", "DRE", "TIPO"] + [c for c in cols if c != "DRE"]].copy()
+    df_show = dfv[["_PAI", "DRE_RAW", "TIPO"] + [c for c in cols if c != "DRE_RAW"]].copy()
 
-    # FORMATOS
+    # ================= VALORES (R$) =================
     if show_money:
         if "real_m3" in df_show.columns:
             df_show["real_m3"] = [
@@ -997,25 +1061,64 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame,
                 for v, t in zip(df_show["d_fc"], df_show["TIPO"])
             ]
 
+    # ================= PORCENTAGENS (%RL) =================
     if show_percent:
-        for c in ["p_m3v", "p_m2v", "p_m1v", "p_proj", "pd_m1", "pd_m12", "pd_fc"]:
+        # % de nível
+        for c in ["p_m3v", "p_m2v", "p_m1v", "p_proj"]:
             if c in df_show.columns:
                 df_show[c] = df_show[c].apply(
                     lambda x: "" if pd.isna(x) else fmt_pct_symbol(x)
                 )
 
-    ordered = ["DRE"]
+        # % de delta – com setinha e classe de cor
+        for c in ["pd_m1", "pd_m12", "pd_fc"]:
+            if c in df_show.columns:
+                df_show[c] = df_show[c].apply(
+                    lambda x: "" if pd.isna(x) else decorate_delta_pp_plain(x)
+                )
+
+    # ================= ORDEM & HTML =================
+    ordered = ["DRE_RAW"]
     if show_money:
         ordered += ["real_m3", "real_m2", "real_m1", "proj", "d_m1", "d_m12", "d_fc"]
     if show_percent:
         ordered += ["p_m3v", "p_m2v", "p_m1v", "p_proj", "pd_m1", "pd_m12", "pd_fc"]
 
     headers = "".join(f"<th>{rename.get(h, h)}</th>" for h in ordered)
+
     rows = []
     for _, r in df_show.iterrows():
-        klass = "parent" if int(r["_PAI"]) == 1 else ""
-        tds = "".join(f"<td>{r.get(h, '')}</td>" for h in ordered)
-        rows.append(f"<tr class='{klass}'>{tds}</tr>")
+        is_parent = int(r["_PAI"]) == 1
+
+        tds = ""
+        for i, h in enumerate(ordered):
+            val = r.get(h, "")
+
+            # primeira coluna = DRE (onde queremos o destaque visual)
+            if i == 0:
+                txt = str(val or "")
+                if is_parent:
+                    # destaque visual só no conteúdo, não no <td>
+                    span = (
+                        "<span style='"
+                        "display:inline-block;"
+                        "padding:2px 4px;"
+                        "background:#f1f6ff;"
+                        "border-radius:4px;"
+                        "font-weight:700;"
+                        "color:#001b4d;"
+                        "'>"
+                        f"{txt}"
+                        "</span>"
+                    )
+                else:
+                    span = txt
+                tds += f"<td>{span}</td>"
+            else:
+                # demais colunas como já vinham formatadas
+                tds += f"<td>{val}</td>"
+
+        rows.append(f"<tr>{tds}</tr>")
 
     return f"""
     <div class='table-wrap'>
@@ -1025,6 +1128,8 @@ def render_table_general(m_df: pd.DataFrame, df_raw: pd.DataFrame,
       </table>
     </div>
     """
+
+
 
 
 def render_table_diretoria(m_df: pd.DataFrame, show_percent_flag: bool,
@@ -1552,22 +1657,30 @@ with tab1:
             st.warning(f"Sem dados para {p0}; usando {p0_eff}.")
         p0 = p0_eff
 
-        p_m1  = _period_minus(p0,1)
-        p_m2  = _period_minus(p0,2)
-        p_m3  = _period_minus(p0,3)
-        p_m12 = _period_minus(p0,12)
-        st.markdown(f"**Períodos:** P0=`{p0}` • M-1=`{p_m1}` • M-2=`{p_m2}` • M-3=`{p_m3}` • M-12=`{p_m12}`")
+        p_m1  = _period_minus(p0, 1)
+        p_m2  = _period_minus(p0, 2)
+        p_m3  = _period_minus(p0, 3)
+        p_m12 = _period_minus(p0, 12)
 
-        m  = pivotize(df,          p0, p_m1, p_m2, p_m3, p_m12)
+        st.markdown(
+            f"**Períodos:** P0=`{p0}` • M-1=`{p_m1}` • M-2=`{p_m2}` • M-3=`{p_m3}` • M-12=`{p_m12}`"
+        )
 
+        # Pivot principal para a Visão Geral (Consolidado)
+        m = pivotize(df, p0, p_m1, p_m2, p_m3, p_m12)
+
+# ==========================
+        # TABELA PRINCIPAL VISÃO GERAL
+        # ==========================
         tmp_opts = (
-            m[["KPI","ORDEM"]]
+            m[["KPI", "ORDEM"]]
             .dropna(subset=["KPI"])
             .assign(ORDEM=pd.to_numeric(m["ORDEM"], errors="coerce").fillna(9999))
             .groupby("KPI", as_index=False)["ORDEM"].min()
             .sort_values("ORDEM")
         )
         kpi_opts_all = tmp_opts["KPI"].tolist()
+
         kpi_filter = st.selectbox(
             "Filtrar KPI (linha):",
             options=["(todos)"] + kpi_opts_all,
@@ -1576,13 +1689,120 @@ with tab1:
         )
 
         m_show = m if kpi_filter == "(todos)" else m[m["KPI"] == kpi_filter].copy()
+
         if m_show.empty:
             st.info("KPI sem dados para os filtros.")
         else:
             st.markdown(
                 render_table_general(m_show, df, show_money, show_percent),
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
+
+        # ==========================
+        # 🔎 HIGHLIGHTS DO MÊS
+        # ==========================
+        st.markdown("### 🔎 Highlights do mês")
+
+        def _is_consolidado_selected_only():
+            return (
+                len(diretoria_sel_keys) == 1
+                and diretoria_sel_keys[0] == ""
+                and len(setor_sel) == 0
+            )
+
+        _show_sector_breakdown = _is_consolidado_selected_only()
+
+        def _excluded_kpi(name: str) -> bool:
+            up = (name or "").upper()
+            if any(x in up for x in ["IMPOST", "TRIBUT", "TAXA", "ICMS", "PIS", "COFINS", "ISS"]):
+                return True
+            if re.search(r"MARGEM\s*[5-9]", up):
+                return True
+            return False
+
+        work = m[m["AGREG"].str.lower() == "pai"].copy()
+        work = work[~work["KPI_COMPACT"].apply(_excluded_kpi)]
+        work["gap_m1"] = pd.to_numeric(work["d_m1"], errors="coerce")
+
+        col_neg, col_pos = st.columns(2)
+
+        # --- Maiores quedas ---
+        with col_neg:
+            st.subheader("📉 Maiores quedas (gap ≤ -R$ 100 mil)")
+            neg = work[(work["gap_m1"].notna()) & (work["gap_m1"] <= -100_000)]
+            if neg.empty:
+                st.caption("Nenhuma queda ≥ R$ 100 mil.")
+            else:
+                for _, r in neg.sort_values("gap_m1").iterrows():
+                    kpi_name = r["KPI_COMPACT"]
+                    delta_rs = abs(float(r["gap_m1"]))
+                    setores_txt = ""
+
+                    if _show_sector_breakdown:
+                        contr = sector_contribution_delta_m1(df_all_dirs, kpi_name, p0, p_m1)
+                        if contr.empty or contr.abs().sum() == 0:
+                            contr = sector_contribution_delta_m1(base, kpi_name, p0, p_m1)
+
+                        if not contr.empty:
+                            if (contr < 0).any():
+                                contr_use = contr[contr < 0].sort_values().head(2)
+                            else:
+                                contr_use = contr.abs().sort_values(ascending=False).head(2)
+
+                            parts = [
+                                f"{str(n).title()} ({fmt_brl(abs(float(v)))})"
+                                for n, v in contr_use.items()
+                            ]
+                            if parts:
+                                setores_txt = " — puxado por " + " e ".join(parts)
+
+                    st.markdown(
+                        f"<div class='hl-card'><div class='hl-sub'>"
+                        f"<b>{kpi_name.upper()}</b> com <span class='hl-bad'>queda</span> de "
+                        f"<b>{fmt_brl(delta_rs)}</b> vs M-1{setores_txt}."
+                        f"</div></div>",
+                        unsafe_allow_html=True,
+                    )
+
+        # --- Maiores melhorias ---
+        with col_pos:
+            st.subheader("📈 Maiores melhorias (≥ +R$ 100 mil)")
+            pos = work[(work["gap_m1"].notna()) & (work["gap_m1"] >= 100_000)]
+            if pos.empty:
+                st.caption("Nenhuma melhora ≥ R$ 100 mil.")
+            else:
+                for _, r in pos.sort_values("gap_m1", ascending=False).iterrows():
+                    kpi_name = r["KPI_COMPACT"]
+                    delta_rs = float(r["gap_m1"])
+                    setores_txt = ""
+
+                    if _show_sector_breakdown:
+                        contr = sector_contribution_delta_m1(df_all_dirs, kpi_name, p0, p_m1)
+                        if contr.empty or contr.abs().sum() == 0:
+                            contr = sector_contribution_delta_m1(base, kpi_name, p0, p_m1)
+
+                        if not contr.empty:
+                            if (contr > 0).any():
+                                contr_use = contr[contr > 0].sort_values(ascending=False).head(2)
+                            else:
+                                contr_use = contr.abs().sort_values(ascending=False).head(2)
+
+                            parts = [
+                                f"{str(n).title()} ({fmt_brl(abs(float(v)))})"
+                                for n, v in contr_use.items()
+                            ]
+                            if parts:
+                                setores_txt = " — puxado por " + " e ".join(parts)
+
+                    st.markdown(
+                        f"<div class='hl-card'><div class='hl-sub'>"
+                        f"<b>{kpi_name.upper()}</b> com <span class='delta-up'>melhora</span> de "
+                        f"<b>{fmt_brl(delta_rs)}</b> vs M-1{setores_txt}."
+                        f"</div></div>",
+                        unsafe_allow_html=True,
+                    )
+
+        
 
         # Download XLSX apenas com o recorte atual
         st.download_button(
@@ -1591,6 +1811,8 @@ with tab1:
             file_name=f"pnl_{p0}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+
 
 # ---------- VISÃO DIRETORIA ----------
 
@@ -1998,13 +2220,13 @@ with tab5:
 
 with tab6:
     st.markdown("## 🛒 Visão Canal (B2C)")
+    st.caption("Comparativo M, M-1, M-2, M-3 e M-12 por Parceiro / Canal.")
 
-    # --- Carrega base específica do canal ---
     if canal_df is None or canal_meta is None or canal_df.empty:
         st.info("Sem dados na aba 'BASE CANAL'.")
         st.stop()
 
-    # --- Cache leve (para labels de mês) ---
+    # --- Cache leve (labels de mês) ---
     @st.cache_data(show_spinner=False)
     def get_mes_labels(df):
         raw_meses = sorted([m for m in df["MES"].unique() if str(m).strip()])
@@ -2024,25 +2246,49 @@ with tab6:
         return raw_meses, mes_labels, inv_labels
 
     raw_meses, mes_labels, inv_labels = get_mes_labels(canal_df)
-
     if not raw_meses:
         st.info("Sem meses disponíveis para Canal B2C.")
         st.stop()
 
+    # --- Seleção do mês vigente ---
     default_label = mes_labels[raw_meses[-1]]
     mes_sel_label = st.selectbox(
-        "Mês:",
+        "Mês vigente:",
         options=list(inv_labels.keys()),
         index=list(inv_labels.keys()).index(default_label),
         key="canal_mes"
     )
     mes_sel = inv_labels[mes_sel_label]
-    df_mes = canal_df[canal_df["MES"] == mes_sel].copy()
+
+    # --- Monta lista de comparativos (sempre vamos exibir todas as colunas) ---
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
+
+    def shift_mes(mmYYYY, shift):
+        try:
+            if "/" in mmYYYY:
+                mm, yyyy = mmYYYY.split("/")
+                d = datetime(int(yyyy), int(mm), 1)
+            elif "-" in mmYYYY:
+                yyyy, mm = mmYYYY.split("-")
+                d = datetime(int(yyyy), int(mm), 1)
+            else:
+                return mmYYYY
+            d2 = d + relativedelta(months=shift)
+            return f"{d2.month:02d}/{d2.year}"
+        except Exception:
+            return mmYYYY
+
+    meses_chave = [mes_sel] + [shift_mes(mes_sel, -i) for i in [1, 2, 3, 12]]
+    rotulos = ["M", "M-1", "M-2", "M-3", "M-12"]
+
+    # --- Subconjunto com apenas os meses relevantes (performance) ---
+    df_comp = canal_df[canal_df["MES"].isin(meses_chave)].copy()
 
     # --- Filtros locais (Parceiro / Canal) ---
     c1, c2 = st.columns(2)
     with c1:
-        parceiros = sorted(df_mes["PARCEIRO"].dropna().unique().tolist())
+        parceiros = sorted(df_comp["PARCEIRO"].dropna().unique().tolist())
         parc_sel = st.multiselect(
             "Parceiro(s):",
             options=["(todos)"] + parceiros,
@@ -2050,7 +2296,7 @@ with tab6:
             key="canal_parc"
         )
     with c2:
-        canais = sorted(df_mes["CANAL"].dropna().unique().tolist())
+        canais = sorted(df_comp["CANAL"].dropna().unique().tolist())
         canal_sel = st.multiselect(
             "Canal(is):",
             options=["(todos)"] + canais,
@@ -2059,20 +2305,15 @@ with tab6:
         )
 
     if "(todos)" not in parc_sel:
-        df_mes = df_mes[df_mes["PARCEIRO"].isin(parc_sel)]
+        df_comp = df_comp[df_comp["PARCEIRO"].isin(parc_sel)]
     if "(todos)" not in canal_sel:
-        df_mes = df_mes[df_mes["CANAL"].isin(canal_sel)]
+        df_comp = df_comp[df_comp["CANAL"].isin(canal_sel)]
 
-    # --- Filtros opcionais (iguais ao B2B) ---
+    # --- KPIs disponíveis ---
     meta_sorted = canal_meta.sort_values("order")
     kpi_all = meta_sorted["kpi"].tolist()
 
-    c3, c4 = st.columns(2)
-    with c3:
-        canal_only_totais = st.checkbox("Mostrar apenas totais", value=False, key="canal_totais")
-    with c4:
-        canal_only_margem = st.checkbox("Apenas margens", value=False, key="canal_margem")
-
+    # 👉 KPI com "(todos)" como default
     kpi_sel = st.selectbox(
         "Filtrar KPI (coluna):",
         options=["(todos)"] + kpi_all,
@@ -2080,63 +2321,62 @@ with tab6:
         key="canal_kpi"
     )
 
-    # --- Cache do subset da base filtrada ---
+    # Se ficou em "(todos)", usamos o 1º KPI apenas para exibir (mantém tela funcional)
+    if kpi_sel == "(todos)":
+        if not kpi_all:
+            st.info("Não há KPIs disponíveis.")
+            st.stop()
+        kpi_efetivo = kpi_all[0]
+        st.caption(f"Exibindo KPI padrão: **{kpi_efetivo}** (selecione um KPI específico para alterar).")
+    else:
+        kpi_efetivo = kpi_sel
+
+    # --- Monta base comparativa (garante TODAS as colunas M, M-1, M-2, M-3, M-12) ---
     @st.cache_data(show_spinner=False)
-    def filter_canal_base(df_mes, kpi_all, canal_only_totais, canal_only_margem, kpi_sel):
-        kpis_use = kpi_all.copy()
+    def build_canal_comparativo(df_comp, kpi_col, meses_chave, rotulos):
+        # pivot rápido (soma por PARCEIRO/CANAL)
+        pv = (
+            df_comp.pivot_table(
+                index=["PARCEIRO", "CANAL"],
+                columns="MES",
+                values=kpi_col,
+                aggfunc="sum"
+            )
+            .fillna(0)
+        )
 
-        if canal_only_totais:
-            kpis_use = [
-                k for k in kpis_use
-                if ("TOTAL" in _norm_key(k))
-                or ("MARGEM CONTRIBUICAO" in _norm_key(k))
-                or (_norm_key(k) in {"MBL", "LAIR"})
-            ]
+        # remove colunas duplicadas (pode acontecer com merges de meses)
+        pv = pv.loc[:, ~pv.columns.duplicated()]
 
-        if canal_only_margem:
-            def is_margin_k(k):
-                nk = _norm_key(k)
-                return any(kw in nk for kw in [
-                    "MARGEM CONTRIBUICAO #1",
-                    "MARGEM CONTRIBUICAO #2",
-                    "MARGEM CONTRIBUICAO #3",
-                    "MARGEM CONTRIBUICAO #4",
-                    "MARGEM FRONT",
-                    "COMISSAO PARCEIRO"
-                ])
-            kpis_use = [k for k in kpis_use if is_margin_k(k)]
+        # garante que todos os meses-chaves existam como coluna (mesmo se não houver dado)
+        for m in meses_chave:
+            if m not in pv.columns:
+                pv[m] = 0
 
-        if kpi_sel != "(todos)":
-            kpis_use = [k for k in kpis_use if k == kpi_sel]
+        # reordena pelas chaves
+        pv = pv[meses_chave]
 
-        show_cols = ["PARCEIRO", "CANAL"] + kpis_use
-        df_view = df_mes[show_cols].copy()
-        return df_view, kpis_use
+        # renomeia para M, M-1, ...
+        rename_map = {m: lbl for m, lbl in zip(meses_chave, rotulos)}
+        pv = pv.rename(columns=rename_map).reset_index()
 
-    df_view, kpis_use = filter_canal_base(df_mes, kpi_all, canal_only_totais, canal_only_margem, kpi_sel)
+        return pv
 
-    if not kpis_use:
-        st.info("Nenhum KPI selecionado para exibição.")
-        st.stop()
+    df_view = build_canal_comparativo(df_comp, kpi_efetivo, meses_chave, rotulos)
 
-    # --- Renderização HTML cacheada (layout igual ao B2B) ---
+    # --- Render (com formatação R$) ---
     @st.cache_data(show_spinner=False)
-    def render_canal_html(df_view, kpis_use, canal_meta):
-        meta_lookup = {row["kpi"]: bool(row["is_pct"]) for _, row in canal_meta.iterrows()}
-
+    def render_canal_html(df_view):
         headers = "".join(f"<th>{c}</th>" for c in df_view.columns)
         rows_html = []
         for _, row in df_view.iterrows():
-            tds = []
+            row_tds = []
             for c in df_view.columns:
                 if c in ("PARCEIRO", "CANAL"):
-                    tds.append(f"<td>{row[c]}</td>")
+                    row_tds.append(f"<td>{row[c]}</td>")
                 else:
-                    is_pct = meta_lookup.get(c, False)
-                    val = fmt_b2b_value(row[c], is_pct)
-                    tds.append(f"<td>{val}</td>")
-            rows_html.append(f"<tr>{''.join(tds)}</tr>")
-
+                    row_tds.append(f"<td>{fmt_brl(row[c])}</td>")
+            rows_html.append(f"<tr>{''.join(row_tds)}</tr>")
         html = f"""
         <div class='table-wrap'>
           <table id="pnltbl_canal" class='pnltbl'>
@@ -2147,13 +2387,9 @@ with tab6:
         """
         return html
 
-    start_time = datetime.now()
-    html_table = render_canal_html(df_view, kpis_use, canal_meta)
-    end_time = datetime.now()
+    st.markdown(f"**Período vigente:** {mes_sel_label}")
+    st.markdown(render_canal_html(df_view), unsafe_allow_html=True)
 
-    st.markdown(f"**Período selecionado:** {mes_sel_label}")
-    st.markdown(html_table, unsafe_allow_html=True)
-    st.caption(f"⏱ Tempo de renderização: {(end_time - start_time).total_seconds():.2f} s")
 
 
 
